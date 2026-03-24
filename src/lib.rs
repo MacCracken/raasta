@@ -30,6 +30,7 @@
 mod agent;
 mod follow;
 mod grid;
+mod hpa;
 mod mesh;
 mod path;
 mod smooth;
@@ -44,6 +45,7 @@ pub use hisab::Vec2;
 pub use agent::Agent;
 pub use follow::PathFollower;
 pub use grid::{GridPos, NavGrid};
+pub use hpa::{AbstractGraph, AbstractNodeId, ClusterId, Entrance, GridClusters};
 pub use mesh::{NavMesh, NavPoly, NavPolyId};
 pub use path::{PathRequest, PathResult, PathStatus};
 pub use smooth::funnel_smooth;

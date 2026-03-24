@@ -1,7 +1,7 @@
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use raasta::{
-    Agent, GridPos, NavGrid, NavMesh, NavPoly, NavPolyId, Obstacle, PathFollower, SteerBehavior,
-    Vec2, avoid_obstacles, compute_steer,
+    AbstractGraph, Agent, GridClusters, GridPos, NavGrid, NavMesh, NavPoly, NavPolyId, Obstacle,
+    PathFollower, SteerBehavior, Vec2, avoid_obstacles, compute_steer,
 };
 
 fn bench_grid_astar_10x10(c: &mut Criterion) {
@@ -235,12 +235,115 @@ fn bench_agent_tick(c: &mut Criterion) {
     });
 }
 
+fn bench_jps_50x50(c: &mut Criterion) {
+    let grid = NavGrid::new(50, 50, 1.0);
+    c.bench_function("jps_50x50", |b| {
+        b.iter(|| {
+            black_box(grid.find_path_jps(GridPos::new(0, 0), GridPos::new(49, 49)));
+        });
+    });
+}
+
+fn bench_jps_100x100(c: &mut Criterion) {
+    let grid = NavGrid::new(100, 100, 1.0);
+    c.bench_function("jps_100x100", |b| {
+        b.iter(|| {
+            black_box(grid.find_path_jps(GridPos::new(0, 0), GridPos::new(99, 99)));
+        });
+    });
+}
+
+fn bench_jps_50x50_obstacles(c: &mut Criterion) {
+    let mut grid = NavGrid::new(50, 50, 1.0);
+    for y in (0..50).step_by(4) {
+        for x in 0..48 {
+            grid.set_walkable(x, y, false);
+        }
+    }
+    for y in (2..50).step_by(4) {
+        for x in 2..50 {
+            grid.set_walkable(x, y, false);
+        }
+    }
+    c.bench_function("jps_50x50_obstacles", |b| {
+        b.iter(|| {
+            black_box(grid.find_path_jps(GridPos::new(0, 1), GridPos::new(49, 49)));
+        });
+    });
+}
+
+fn bench_hpa_200x200_batch(c: &mut Criterion) {
+    let mut grid = NavGrid::new(200, 200, 1.0);
+    // Add walls to make it interesting
+    for y in (0..200).step_by(20) {
+        for x in 0..190 {
+            grid.set_walkable(x, y, false);
+        }
+    }
+    for y in (10..200).step_by(20) {
+        for x in 10..200 {
+            grid.set_walkable(x, y, false);
+        }
+    }
+    let clusters = GridClusters::build(&grid, 16);
+    let graph = AbstractGraph::build(&grid, &clusters);
+    let requests: Vec<(GridPos, GridPos)> = (0..20)
+        .map(|i| {
+            let sx = ((i * 7 + 1) % 190) + 1;
+            let sy = ((i * 13 + 1) % 19) + 1;
+            let gx = ((i * 11 + 3) % 190) + 1;
+            let gy = 199 - ((i * 3) % 19);
+            (GridPos::new(sx, sy), GridPos::new(gx, gy))
+        })
+        .collect();
+    c.bench_function("hpa_200x200_batch20", |b| {
+        b.iter(|| {
+            for (start, goal) in &requests {
+                black_box(graph.find_path(&grid, &clusters, *start, *goal));
+            }
+        });
+    });
+}
+
+fn bench_astar_200x200_batch(c: &mut Criterion) {
+    let mut grid = NavGrid::new(200, 200, 1.0);
+    for y in (0..200).step_by(20) {
+        for x in 0..190 {
+            grid.set_walkable(x, y, false);
+        }
+    }
+    for y in (10..200).step_by(20) {
+        for x in 10..200 {
+            grid.set_walkable(x, y, false);
+        }
+    }
+    let requests: Vec<(GridPos, GridPos)> = (0..20)
+        .map(|i| {
+            let sx = ((i * 7 + 1) % 190) + 1;
+            let sy = ((i * 13 + 1) % 19) + 1;
+            let gx = ((i * 11 + 3) % 190) + 1;
+            let gy = 199 - ((i * 3) % 19);
+            (GridPos::new(sx, sy), GridPos::new(gx, gy))
+        })
+        .collect();
+    c.bench_function("astar_200x200_batch20", |b| {
+        b.iter(|| {
+            for (start, goal) in &requests {
+                black_box(grid.find_path(*start, *goal));
+            }
+        });
+    });
+}
+
 criterion_group!(
     benches,
     bench_grid_astar_10x10,
     bench_grid_astar_50x50,
     bench_grid_astar_100x100,
     bench_grid_astar_with_obstacles,
+    bench_jps_50x50,
+    bench_jps_100x100,
+    bench_jps_50x50_obstacles,
     bench_flow_field_20x20,
     bench_flow_field_50x50,
     bench_navmesh_path_10_polys,
@@ -252,5 +355,7 @@ criterion_group!(
     bench_avoid_obstacles_10,
     bench_agent_tick,
     bench_grid_astar_batch_100,
+    bench_hpa_200x200_batch,
+    bench_astar_200x200_batch,
 );
 criterion_main!(benches);
