@@ -112,6 +112,7 @@ pub fn compute_steer(behavior: &SteerBehavior, position: Vec2, max_speed: f32) -
 /// - `obstacles`: slice of circular obstacles to avoid
 /// - `look_ahead`: how far ahead to check for obstacles
 /// - `max_force`: maximum avoidance force magnitude
+#[inline]
 #[must_use]
 pub fn avoid_obstacles(
     position: Vec2,

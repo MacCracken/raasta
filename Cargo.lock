@@ -369,7 +369,6 @@ dependencies = [
  "hisab",
  "serde",
  "serde_json",
- "thiserror",
  "tracing",
  "tracing-subscriber",
 ]

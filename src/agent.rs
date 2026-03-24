@@ -81,15 +81,16 @@ impl Agent {
         let combined = path_steer.velocity + avoid_steer.velocity;
 
         // Truncate to max force
-        let force = if combined.length() > self.max_force {
-            combined.normalize() * self.max_force
+        let combined_len = combined.length();
+        let force = if combined_len > self.max_force {
+            combined * (self.max_force / combined_len)
         } else {
             combined
         };
 
         // Direct velocity steering — set velocity from force direction
         // (rather than accumulating force, which causes overshoot)
-        if force.length_squared() > f32::EPSILON {
+        if force.length() > f32::EPSILON {
             self.velocity = force;
         } else {
             self.velocity = Vec2::ZERO;

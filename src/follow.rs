@@ -67,20 +67,21 @@ impl PathFollower {
     /// Returns zero output if the path is finished or empty.
     #[must_use]
     pub fn steer(&mut self, position: Vec2, max_speed: f32) -> SteerOutput {
-        let target = match self.current_target() {
-            Some(t) => t,
-            None => return SteerOutput::default(),
-        };
+        // Advance past any waypoints we've already reached
+        loop {
+            let target = match self.current_target() {
+                Some(t) => t,
+                None => return SteerOutput::default(),
+            };
 
-        let dist = position.distance(target);
-
-        // Check if we've arrived at the current waypoint
-        if dist < self.arrival_threshold {
+            if position.distance(target) >= self.arrival_threshold {
+                break;
+            }
             self.current += 1;
-            // Re-check — may have finished or need to steer to next
-            return self.steer(position, max_speed);
         }
 
+        // Safety: loop above ensures current_target() is Some
+        let target = self.waypoints[self.current];
         let is_final = self.current == self.waypoints.len() - 1;
 
         let behavior = if is_final {
