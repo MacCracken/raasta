@@ -28,6 +28,8 @@
 //! ```
 
 mod agent;
+mod crowd;
+mod debug_draw;
 mod follow;
 mod grid;
 mod hpa;
@@ -47,6 +49,8 @@ pub mod logging;
 pub use hisab::{Vec2, Vec3};
 
 pub use agent::Agent;
+pub use crowd::CrowdSimulation;
+pub use debug_draw::{DebugDraw, DebugLine, DebugPoint};
 pub use follow::PathFollower;
 pub use grid::{GridPos, NavGrid};
 pub use hpa::{AbstractGraph, AbstractNodeId, ClusterId, Entrance, GridClusters};

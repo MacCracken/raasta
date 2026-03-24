@@ -172,6 +172,37 @@ impl NavGrid {
         }
     }
 
+    /// Find the nearest walkable cell to the given position.
+    ///
+    /// Searches outward in a spiral pattern. Returns `None` if no walkable
+    /// cell exists in the grid.
+    #[must_use]
+    pub fn nearest_walkable(&self, pos: GridPos) -> Option<GridPos> {
+        if self.is_walkable(pos.x, pos.y) {
+            return Some(pos);
+        }
+        let max_radius = self.width.max(self.height) as i32;
+        for r in 1..=max_radius {
+            for dx in -r..=r {
+                for &dy in &[-r, r] {
+                    let candidate = GridPos::new(pos.x + dx, pos.y + dy);
+                    if self.is_walkable(candidate.x, candidate.y) {
+                        return Some(candidate);
+                    }
+                }
+            }
+            for dy in (-r + 1)..r {
+                for &dx in &[-r, r] {
+                    let candidate = GridPos::new(pos.x + dx, pos.y + dy);
+                    if self.is_walkable(candidate.x, candidate.y) {
+                        return Some(candidate);
+                    }
+                }
+            }
+        }
+        None
+    }
+
     /// Reset all cells to walkable with cost 1.0.
     pub fn clear(&mut self) {
         self.walkable.fill(true);
@@ -522,6 +553,127 @@ impl NavGrid {
         }
 
         path
+    }
+
+    /// Check line-of-sight between two grid cells using Bresenham's line.
+    ///
+    /// Returns `true` if all cells along the line are walkable.
+    #[must_use]
+    pub fn has_line_of_sight(&self, from: GridPos, to: GridPos) -> bool {
+        let mut x = from.x;
+        let mut y = from.y;
+        let dx = (to.x - from.x).abs();
+        let dy = (to.y - from.y).abs();
+        let sx = if from.x < to.x { 1 } else { -1 };
+        let sy = if from.y < to.y { 1 } else { -1 };
+        let mut err = dx - dy;
+
+        loop {
+            if !self.is_walkable(x, y) {
+                return false;
+            }
+            if x == to.x && y == to.y {
+                return true;
+            }
+            let e2 = 2 * err;
+            if e2 > -dy {
+                err -= dy;
+                x += sx;
+            }
+            if e2 < dx {
+                err += dx;
+                y += sy;
+            }
+        }
+    }
+
+    /// Find a path using Theta\* (any-angle pathfinding).
+    ///
+    /// Like A\*, but checks line-of-sight to the parent's parent. If LOS
+    /// exists, skips the intermediate node, producing smoother paths
+    /// without post-processing.
+    #[must_use]
+    pub fn find_path_theta(&self, start: GridPos, goal: GridPos) -> Option<Vec<GridPos>> {
+        if !self.is_walkable(start.x, start.y) || !self.is_walkable(goal.x, goal.y) {
+            return None;
+        }
+        if start == goal {
+            return Some(vec![start]);
+        }
+
+        let len = self.width * self.height;
+        let mut g_score = vec![f32::INFINITY; len];
+        let mut came_from: Vec<Option<usize>> = vec![None; len];
+        let mut closed = vec![false; len];
+        let mut open = BinaryHeap::new();
+
+        let start_idx = self.index(start.x, start.y)?;
+        let goal_idx = self.index(goal.x, goal.y)?;
+
+        g_score[start_idx] = 0.0;
+        let h = start.octile_distance(goal);
+        open.push(AStarNode {
+            idx: start_idx,
+            f_score: h,
+        });
+
+        let mut neighbors_buf = [(0i32, 0i32, 0.0f32); 8];
+
+        while let Some(current) = open.pop() {
+            if current.idx == goal_idx {
+                return Some(self.reconstruct_path(&came_from, goal_idx));
+            }
+
+            if closed[current.idx] {
+                continue;
+            }
+            closed[current.idx] = true;
+
+            let cx = (current.idx % self.width) as i32;
+            let cy = (current.idx / self.width) as i32;
+            let count = self.neighbors_into(cx, cy, &mut neighbors_buf);
+
+            for &(nx, ny, _) in &neighbors_buf[..count] {
+                let n_idx = self.index_unchecked(nx, ny);
+                if closed[n_idx] {
+                    continue;
+                }
+
+                let neighbor_pos = GridPos::new(nx, ny);
+
+                // Theta* key insight: check LOS from parent of current to neighbor
+                let (source_idx, source_g) = if let Some(parent_idx) = came_from[current.idx] {
+                    let px = (parent_idx % self.width) as i32;
+                    let py = (parent_idx / self.width) as i32;
+                    let parent_pos = GridPos::new(px, py);
+                    if self.has_line_of_sight(parent_pos, neighbor_pos) {
+                        (parent_idx, g_score[parent_idx])
+                    } else {
+                        (current.idx, g_score[current.idx])
+                    }
+                } else {
+                    (current.idx, g_score[current.idx])
+                };
+
+                let source_pos = GridPos::new(
+                    (source_idx % self.width) as i32,
+                    (source_idx / self.width) as i32,
+                );
+                let tentative_g = source_g + source_pos.octile_distance(neighbor_pos);
+
+                if tentative_g < g_score[n_idx] {
+                    came_from[n_idx] = Some(source_idx);
+                    g_score[n_idx] = tentative_g;
+                    let h = neighbor_pos.octile_distance(goal);
+                    open.push(AStarNode {
+                        idx: n_idx,
+                        f_score: tentative_g + h,
+                    });
+                }
+            }
+        }
+
+        None
     }
 
     /// Generate a flow field toward the given goal.
@@ -1232,6 +1384,119 @@ mod tests {
             let dx = (w[1].x - w[0].x).abs();
             let dy = (w[1].y - w[0].y).abs();
             assert!(dx <= 1 && dy <= 1 && (dx + dy) > 0);
+        }
+    }
+
+    // --- Nav query tests ---
+
+    #[test]
+    fn nearest_walkable_already_walkable() {
+        let grid = NavGrid::new(10, 10, 1.0);
+        assert_eq!(
+            grid.nearest_walkable(GridPos::new(5, 5)),
+            Some(GridPos::new(5, 5))
+        );
+    }
+
+    #[test]
+    fn nearest_walkable_blocked() {
+        let mut grid = NavGrid::new(10, 10, 1.0);
+        grid.set_walkable(5, 5, false);
+        let nearest = grid.nearest_walkable(GridPos::new(5, 5));
+        assert!(nearest.is_some());
+        let n = nearest.unwrap();
+        // Should be adjacent
+        let dist = (n.x - 5).abs() + (n.y - 5).abs();
+        assert!(dist <= 2);
+    }
+
+    #[test]
+    fn nearest_walkable_all_blocked() {
+        let mut grid = NavGrid::new(3, 3, 1.0);
+        grid.block_rect(0, 0, 2, 2);
+        assert!(grid.nearest_walkable(GridPos::new(1, 1)).is_none());
+    }
+
+    // --- Theta* / LOS tests ---
+
+    #[test]
+    fn los_open_grid() {
+        let grid = NavGrid::new(10, 10, 1.0);
+        assert!(grid.has_line_of_sight(GridPos::new(0, 0), GridPos::new(9, 9)));
+    }
+
+    #[test]
+    fn los_blocked_by_wall() {
+        let mut grid = NavGrid::new(10, 10, 1.0);
+        grid.set_walkable(5, 5, false);
+        assert!(!grid.has_line_of_sight(GridPos::new(0, 0), GridPos::new(9, 9)));
+    }
+
+    #[test]
+    fn los_same_cell() {
+        let grid = NavGrid::new(5, 5, 1.0);
+        assert!(grid.has_line_of_sight(GridPos::new(2, 2), GridPos::new(2, 2)));
+    }
+
+    #[test]
+    fn los_horizontal() {
+        let grid = NavGrid::new(10, 10, 1.0);
+        assert!(grid.has_line_of_sight(GridPos::new(0, 5), GridPos::new(9, 5)));
+    }
+
+    #[test]
+    fn theta_open_grid() {
+        let grid = NavGrid::new(10, 10, 1.0);
+        let path = grid.find_path_theta(GridPos::new(0, 0), GridPos::new(9, 9));
+        assert!(path.is_some());
+        let path = path.unwrap();
+        assert_eq!(*path.first().unwrap(), GridPos::new(0, 0));
+        assert_eq!(*path.last().unwrap(), GridPos::new(9, 9));
+    }
+
+    #[test]
+    fn theta_same_start_goal() {
+        let grid = NavGrid::new(5, 5, 1.0);
+        let path = grid.find_path_theta(GridPos::new(2, 2), GridPos::new(2, 2));
+        assert_eq!(path, Some(vec![GridPos::new(2, 2)]));
+    }
+
+    #[test]
+    fn theta_blocked() {
+        let mut grid = NavGrid::new(5, 1, 1.0);
+        grid.set_walkable(2, 0, false);
+        assert!(
+            grid.find_path_theta(GridPos::new(0, 0), GridPos::new(4, 0))
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn theta_fewer_waypoints_than_astar() {
+        // On an open grid, Theta* should produce fewer waypoints
+        // because it can skip intermediate nodes via LOS
+        let grid = NavGrid::new(20, 20, 1.0);
+        let astar = grid
+            .find_path(GridPos::new(0, 0), GridPos::new(19, 19))
+            .unwrap();
+        let theta = grid
+            .find_path_theta(GridPos::new(0, 0), GridPos::new(19, 19))
+            .unwrap();
+        // Theta* path should be equal or shorter in waypoint count
+        assert!(theta.len() <= astar.len());
+    }
+
+    #[test]
+    fn theta_with_wall() {
+        let mut grid = NavGrid::new(20, 20, 1.0);
+        for y in 0..18 {
+            grid.set_walkable(10, y, false);
+        }
+        let path = grid.find_path_theta(GridPos::new(0, 0), GridPos::new(19, 19));
+        assert!(path.is_some());
+        let path = path.unwrap();
+        for p in &path {
+            assert!(grid.is_walkable(p.x, p.y));
         }
     }
 }
