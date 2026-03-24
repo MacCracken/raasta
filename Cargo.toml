@@ -1,0 +1,36 @@
+[package]
+name = "raasta"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.89"
+license = "GPL-3.0"
+description = "Raasta — navigation and pathfinding engine for AGNOS"
+homepage = "https://github.com/MacCracken/raasta"
+repository = "https://github.com/MacCracken/raasta"
+readme = "README.md"
+documentation = "https://docs.rs/raasta"
+keywords = ["pathfinding", "navigation", "navmesh", "astar", "game-engine"]
+categories = ["algorithms", "game-engines"]
+exclude = [".claude/", ".github/", "docs/", "scripts/"]
+
+[features]
+default = []
+logging = ["dep:tracing-subscriber"]
+
+[dependencies]
+# Math — hisab re-exports glam types (Vec2, Vec3, etc.)
+hisab = "0.22"
+serde = { version = "1", features = ["derive"] }
+tracing = "0.1"
+thiserror = "2"
+
+# Logging (optional)
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"], optional = true }
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+serde_json = "1"
+
+[[bench]]
+name = "benchmarks"
+harness = false
