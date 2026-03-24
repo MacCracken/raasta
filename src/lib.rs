@@ -32,21 +32,29 @@ mod follow;
 mod grid;
 mod hpa;
 mod mesh;
+mod mesh3d;
 mod path;
+mod rvo;
 mod smooth;
 mod steer;
+mod steer3d;
+mod triangulate;
 
 #[cfg(feature = "logging")]
 pub mod logging;
 
 // Re-export hisab math types used in our public API
-pub use hisab::Vec2;
+pub use hisab::{Vec2, Vec3};
 
 pub use agent::Agent;
 pub use follow::PathFollower;
 pub use grid::{GridPos, NavGrid};
 pub use hpa::{AbstractGraph, AbstractNodeId, ClusterId, Entrance, GridClusters};
 pub use mesh::{NavMesh, NavPoly, NavPolyId};
+pub use mesh3d::{NavMesh3D, NavPoly3D};
 pub use path::{PathRequest, PathResult, PathStatus};
+pub use rvo::{HalfPlane, RvoAgent, RvoSimulation, compute_orca_half_plane, solve_velocity};
 pub use smooth::funnel_smooth;
 pub use steer::{Obstacle, SteerBehavior, SteerOutput, avoid_obstacles, compute_steer};
+pub use steer3d::{SteerBehavior3D, SteerOutput3D, compute_steer_3d};
+pub use triangulate::{merge_convex, triangulate, triangulate_points};

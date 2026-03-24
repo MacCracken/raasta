@@ -67,6 +67,70 @@ impl NavMesh {
         Self { polys: Vec::new() }
     }
 
+    /// Bake a NavMesh from a simple polygon boundary.
+    ///
+    /// Triangulates the polygon, merges triangles into convex regions,
+    /// and auto-detects neighbor connectivity from shared edges.
+    #[must_use]
+    pub fn bake(boundary: &[Vec2]) -> Self {
+        use crate::triangulate::{merge_convex, triangulate};
+
+        let tris = triangulate(boundary);
+        if tris.is_empty() {
+            return Self::new();
+        }
+
+        let merged = merge_convex(boundary, &tris);
+
+        // Build NavPolys with vertices
+        let mut polys: Vec<NavPoly> = merged
+            .iter()
+            .enumerate()
+            .map(|(i, indices)| NavPoly {
+                id: NavPolyId(i as u32),
+                vertices: indices.iter().map(|&idx| boundary[idx]).collect(),
+                neighbors: Vec::new(),
+            })
+            .collect();
+
+        // Detect neighbors via shared edges
+        // Build edge → poly index map
+        let mut edge_to_poly: std::collections::HashMap<(usize, usize), Vec<u32>> =
+            std::collections::HashMap::new();
+        for (pi, indices) in merged.iter().enumerate() {
+            for i in 0..indices.len() {
+                let j = (i + 1) % indices.len();
+                let key = if indices[i] <= indices[j] {
+                    (indices[i], indices[j])
+                } else {
+                    (indices[j], indices[i])
+                };
+                edge_to_poly.entry(key).or_default().push(pi as u32);
+            }
+        }
+
+        for owners in edge_to_poly.values() {
+            if owners.len() == 2 {
+                let a = owners[0];
+                let b = owners[1];
+                polys[a as usize].neighbors.push(NavPolyId(b));
+                polys[b as usize].neighbors.push(NavPolyId(a));
+            }
+        }
+
+        // Deduplicate neighbors
+        for poly in &mut polys {
+            poly.neighbors.sort_by_key(|n| n.0);
+            poly.neighbors.dedup();
+        }
+
+        let mut mesh = Self::new();
+        for poly in polys {
+            mesh.add_poly(poly);
+        }
+        mesh
+    }
+
     /// Add a polygon to the mesh.
     pub fn add_poly(&mut self, poly: NavPoly) {
         self.polys.push(poly);
@@ -428,5 +492,101 @@ mod tests {
         let json = serde_json::to_string(&id).unwrap();
         let deserialized: NavPolyId = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, id);
+    }
+
+    // --- Bake tests ---
+
+    #[test]
+    fn bake_square() {
+        let boundary = vec![
+            Vec2::ZERO,
+            Vec2::new(4.0, 0.0),
+            Vec2::new(4.0, 4.0),
+            Vec2::new(0.0, 4.0),
+        ];
+        let mesh = NavMesh::bake(&boundary);
+        assert!(mesh.poly_count() >= 1);
+        // Should be able to find a point inside
+        assert!(mesh.find_poly_at(Vec2::new(2.0, 2.0)).is_some());
+    }
+
+    #[test]
+    fn bake_l_shape() {
+        let boundary = vec![
+            Vec2::new(0.0, 0.0),
+            Vec2::new(2.0, 0.0),
+            Vec2::new(2.0, 1.0),
+            Vec2::new(1.0, 1.0),
+            Vec2::new(1.0, 2.0),
+            Vec2::new(0.0, 2.0),
+        ];
+        let mesh = NavMesh::bake(&boundary);
+        assert!(mesh.poly_count() >= 1);
+
+        // Points inside the L should be findable
+        assert!(mesh.find_poly_at(Vec2::new(0.5, 0.5)).is_some());
+        assert!(mesh.find_poly_at(Vec2::new(0.5, 1.5)).is_some());
+
+        // Point outside the L
+        assert!(mesh.find_poly_at(Vec2::new(1.5, 1.5)).is_none());
+    }
+
+    #[test]
+    fn bake_neighbors_connected() {
+        let boundary = vec![
+            Vec2::new(0.0, 0.0),
+            Vec2::new(4.0, 0.0),
+            Vec2::new(4.0, 1.0),
+            Vec2::new(2.0, 1.0),
+            Vec2::new(2.0, 2.0),
+            Vec2::new(0.0, 2.0),
+        ];
+        let mesh = NavMesh::bake(&boundary);
+
+        // If there are multiple polys, they should have neighbor connections
+        if mesh.poly_count() > 1 {
+            let has_neighbors = mesh.polys().iter().any(|p| !p.neighbors.is_empty());
+            assert!(
+                has_neighbors,
+                "multi-poly mesh should have neighbor connections"
+            );
+        }
+    }
+
+    #[test]
+    fn bake_pathfinding_works() {
+        let boundary = vec![
+            Vec2::new(0.0, 0.0),
+            Vec2::new(6.0, 0.0),
+            Vec2::new(6.0, 1.0),
+            Vec2::new(3.0, 1.0),
+            Vec2::new(3.0, 3.0),
+            Vec2::new(0.0, 3.0),
+        ];
+        let mesh = NavMesh::bake(&boundary);
+
+        // Path from one end to another should work if neighbors are connected
+        let start = Vec2::new(0.5, 0.5);
+        let goal = Vec2::new(0.5, 2.5);
+
+        assert!(mesh.find_poly_at(start).is_some());
+        assert!(mesh.find_poly_at(goal).is_some());
+
+        let path = mesh.find_path(start, goal);
+        assert!(path.is_some());
+    }
+
+    #[test]
+    fn bake_empty() {
+        let mesh = NavMesh::bake(&[]);
+        assert_eq!(mesh.poly_count(), 0);
+    }
+
+    #[test]
+    fn bake_triangle() {
+        let boundary = vec![Vec2::ZERO, Vec2::new(3.0, 0.0), Vec2::new(1.5, 3.0)];
+        let mesh = NavMesh::bake(&boundary);
+        assert_eq!(mesh.poly_count(), 1);
+        assert!(mesh.find_poly_at(Vec2::new(1.5, 1.0)).is_some());
     }
 }
