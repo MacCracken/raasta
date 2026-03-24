@@ -1,6 +1,6 @@
 //! Integration tests for raasta.
 
-use raasta::{GridPos, NavGrid, NavMesh, NavPoly, NavPolyId, PathResult, PathStatus};
+use raasta::{GridPos, NavGrid, NavMesh, NavPoly, NavPolyId, PathResult, PathStatus, Vec2};
 use raasta::{SteerBehavior, compute_steer, funnel_smooth};
 
 #[test]
@@ -31,21 +31,36 @@ fn navmesh_pathfinding_end_to_end() {
     // Create a corridor: 3 connected squares
     mesh.add_poly(NavPoly {
         id: NavPolyId(0),
-        vertices: vec![[0.0, 0.0], [2.0, 0.0], [2.0, 2.0], [0.0, 2.0]],
+        vertices: vec![
+            Vec2::ZERO,
+            Vec2::new(2.0, 0.0),
+            Vec2::new(2.0, 2.0),
+            Vec2::new(0.0, 2.0),
+        ],
         neighbors: vec![NavPolyId(1)],
     });
     mesh.add_poly(NavPoly {
         id: NavPolyId(1),
-        vertices: vec![[2.0, 0.0], [4.0, 0.0], [4.0, 2.0], [2.0, 2.0]],
+        vertices: vec![
+            Vec2::new(2.0, 0.0),
+            Vec2::new(4.0, 0.0),
+            Vec2::new(4.0, 2.0),
+            Vec2::new(2.0, 2.0),
+        ],
         neighbors: vec![NavPolyId(0), NavPolyId(2)],
     });
     mesh.add_poly(NavPoly {
         id: NavPolyId(2),
-        vertices: vec![[4.0, 0.0], [6.0, 0.0], [6.0, 2.0], [4.0, 2.0]],
+        vertices: vec![
+            Vec2::new(4.0, 0.0),
+            Vec2::new(6.0, 0.0),
+            Vec2::new(6.0, 2.0),
+            Vec2::new(4.0, 2.0),
+        ],
         neighbors: vec![NavPolyId(1)],
     });
 
-    let path = mesh.find_path([1.0, 1.0], [5.0, 1.0]);
+    let path = mesh.find_path(Vec2::ONE, Vec2::new(5.0, 1.0));
     assert!(path.is_some());
     let path = path.unwrap();
     assert_eq!(path.len(), 3);
@@ -74,7 +89,7 @@ fn grid_flow_field_end_to_end() {
 
 #[test]
 fn path_result_types() {
-    let found = PathResult::found(vec![[0.0, 0.0], [3.0, 4.0]]);
+    let found = PathResult::found(vec![Vec2::ZERO, Vec2::new(3.0, 4.0)]);
     assert_eq!(found.status, PathStatus::Found);
     assert!(found.is_found());
     assert!((found.length - 5.0).abs() < 0.01);
@@ -86,8 +101,12 @@ fn path_result_types() {
 #[test]
 fn steering_follow_path() {
     // Simulate an agent following a path using seek
-    let mut position = [0.0f32, 0.0f32];
-    let waypoints = vec![[5.0, 0.0], [5.0, 5.0], [10.0, 5.0]];
+    let mut position = Vec2::ZERO;
+    let waypoints = vec![
+        Vec2::new(5.0, 0.0),
+        Vec2::new(5.0, 5.0),
+        Vec2::new(10.0, 5.0),
+    ];
     let max_speed = 1.0;
 
     for target in &waypoints {
@@ -97,21 +116,16 @@ fn steering_follow_path() {
                 position,
                 max_speed,
             );
-            position[0] += out.velocity[0] * 0.1;
-            position[1] += out.velocity[1] * 0.1;
+            position += out.velocity * 0.1;
 
-            let dx = target[0] - position[0];
-            let dy = target[1] - position[1];
-            if (dx * dx + dy * dy).sqrt() < 0.5 {
+            if position.distance(*target) < 0.5 {
                 break;
             }
         }
     }
 
     // Should be near the final target
-    let dx = 10.0 - position[0];
-    let dy = 5.0 - position[1];
-    assert!((dx * dx + dy * dy).sqrt() < 1.0);
+    assert!(position.distance(Vec2::new(10.0, 5.0)) < 1.0);
 }
 
 #[test]
@@ -122,19 +136,13 @@ fn smooth_grid_path() {
         .unwrap();
 
     // Convert to world positions
-    let world_path: Vec<[f32; 2]> = path
-        .iter()
-        .map(|p| {
-            let (wx, wy) = grid.grid_to_world(*p);
-            [wx, wy]
-        })
-        .collect();
+    let world_path: Vec<Vec2> = path.iter().map(|p| grid.grid_to_world(*p)).collect();
 
     let smoothed = funnel_smooth(&world_path);
 
     // Smoothed path should be shorter or equal
     assert!(smoothed.len() <= world_path.len());
     // Endpoints preserved
-    assert_eq!(smoothed.first().unwrap(), world_path.first().unwrap());
-    assert_eq!(smoothed.last().unwrap(), world_path.last().unwrap());
+    assert_eq!(smoothed[0], world_path[0]);
+    assert_eq!(*smoothed.last().unwrap(), *world_path.last().unwrap());
 }

@@ -1,5 +1,5 @@
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
-use raasta::{GridPos, NavGrid, NavMesh, NavPoly, NavPolyId, SteerBehavior, compute_steer};
+use raasta::{GridPos, NavGrid, NavMesh, NavPoly, NavPolyId, SteerBehavior, Vec2, compute_steer};
 
 fn bench_grid_astar_10x10(c: &mut Criterion) {
     let grid = NavGrid::new(10, 10, 1.0);
@@ -79,36 +79,41 @@ fn bench_navmesh_path_10_polys(c: &mut Criterion) {
         }
         mesh.add_poly(NavPoly {
             id: NavPolyId(i),
-            vertices: vec![[x, 0.0], [x + 2.0, 0.0], [x + 2.0, 2.0], [x, 2.0]],
+            vertices: vec![
+                Vec2::new(x, 0.0),
+                Vec2::new(x + 2.0, 0.0),
+                Vec2::new(x + 2.0, 2.0),
+                Vec2::new(x, 2.0),
+            ],
             neighbors,
         });
     }
     c.bench_function("navmesh_path_10_polys", |b| {
         b.iter(|| {
-            black_box(mesh.find_path([1.0, 1.0], [19.0, 1.0]));
+            black_box(mesh.find_path(Vec2::ONE, Vec2::new(19.0, 1.0)));
         });
     });
 }
 
 fn bench_steer_seek(c: &mut Criterion) {
     let behavior = SteerBehavior::Seek {
-        target: [100.0, 100.0],
+        target: Vec2::new(100.0, 100.0),
     };
     c.bench_function("steer_seek", |b| {
         b.iter(|| {
-            black_box(compute_steer(&behavior, [0.0, 0.0], 5.0));
+            black_box(compute_steer(&behavior, Vec2::ZERO, 5.0));
         });
     });
 }
 
 fn bench_steer_arrive(c: &mut Criterion) {
     let behavior = SteerBehavior::Arrive {
-        target: [10.0, 10.0],
+        target: Vec2::new(10.0, 10.0),
         slow_radius: 5.0,
     };
     c.bench_function("steer_arrive", |b| {
         b.iter(|| {
-            black_box(compute_steer(&behavior, [7.0, 7.0], 5.0));
+            black_box(compute_steer(&behavior, Vec2::new(7.0, 7.0), 5.0));
         });
     });
 }

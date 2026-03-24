@@ -3,6 +3,7 @@
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
+use hisab::Vec2;
 use serde::{Deserialize, Serialize};
 
 /// Unique identifier for a navigation polygon.
@@ -14,7 +15,7 @@ pub struct NavPolyId(pub u32);
 pub struct NavPoly {
     pub id: NavPolyId,
     /// Vertices of this polygon (in order, convex).
-    pub vertices: Vec<[f32; 2]>,
+    pub vertices: Vec<Vec2>,
     /// IDs of neighboring polygons.
     pub neighbors: Vec<NavPolyId>,
 }
@@ -22,21 +23,17 @@ pub struct NavPoly {
 impl NavPoly {
     /// Compute the centroid of this polygon.
     #[must_use]
-    pub fn centroid(&self) -> [f32; 2] {
+    pub fn centroid(&self) -> Vec2 {
         if self.vertices.is_empty() {
-            return [0.0, 0.0];
+            return Vec2::ZERO;
         }
-        let n = self.vertices.len() as f32;
-        let (sx, sy) = self
-            .vertices
-            .iter()
-            .fold((0.0f32, 0.0f32), |(ax, ay), v| (ax + v[0], ay + v[1]));
-        [sx / n, sy / n]
+        let sum: Vec2 = self.vertices.iter().copied().sum();
+        sum / self.vertices.len() as f32
     }
 
     /// Check if a point is inside this convex polygon (2D, XY plane).
     #[must_use]
-    pub fn contains_point(&self, point: [f32; 2]) -> bool {
+    pub fn contains_point(&self, point: Vec2) -> bool {
         let n = self.vertices.len();
         if n < 3 {
             return false;
@@ -44,11 +41,9 @@ impl NavPoly {
         let mut sign = None;
         for i in 0..n {
             let j = (i + 1) % n;
-            let ex = self.vertices[j][0] - self.vertices[i][0];
-            let ey = self.vertices[j][1] - self.vertices[i][1];
-            let px = point[0] - self.vertices[i][0];
-            let py = point[1] - self.vertices[i][1];
-            let cross = ex * py - ey * px;
+            let edge = self.vertices[j] - self.vertices[i];
+            let to_point = point - self.vertices[i];
+            let cross = edge.perp_dot(to_point);
             let s = cross >= 0.0;
             match sign {
                 None => sign = Some(s),
@@ -91,7 +86,7 @@ impl NavMesh {
 
     /// Find which polygon contains the given point.
     #[must_use]
-    pub fn find_poly_at(&self, point: [f32; 2]) -> Option<NavPolyId> {
+    pub fn find_poly_at(&self, point: Vec2) -> Option<NavPolyId> {
         self.polys
             .iter()
             .find(|p| p.contains_point(point))
@@ -102,7 +97,7 @@ impl NavMesh {
     ///
     /// Returns a sequence of polygon IDs from start to goal.
     #[must_use]
-    pub fn find_path(&self, start: [f32; 2], goal: [f32; 2]) -> Option<Vec<NavPolyId>> {
+    pub fn find_path(&self, start: Vec2, goal: Vec2) -> Option<Vec<NavPolyId>> {
         let start_id = self.find_poly_at(start)?;
         let goal_id = self.find_poly_at(goal)?;
 
@@ -113,12 +108,13 @@ impl NavMesh {
         // A* over polygon graph
         let mut g_score = std::collections::HashMap::new();
         let mut came_from = std::collections::HashMap::new();
+        let mut closed = std::collections::HashSet::new();
         let mut open = BinaryHeap::new();
 
         g_score.insert(start_id, 0.0f32);
         let goal_centroid = self.get_poly(goal_id)?.centroid();
         let start_centroid = self.get_poly(start_id)?.centroid();
-        let h = dist2d(start_centroid, goal_centroid);
+        let h = start_centroid.distance(goal_centroid);
 
         open.push(MeshNode {
             id: start_id,
@@ -130,21 +126,28 @@ impl NavMesh {
                 return Some(self.reconstruct_path(&came_from, goal_id));
             }
 
+            if !closed.insert(current.id) {
+                continue;
+            }
+
             let current_g = g_score[&current.id];
             let poly = self.get_poly(current.id)?;
             let current_centroid = poly.centroid();
 
             for &neighbor_id in &poly.neighbors {
+                if closed.contains(&neighbor_id) {
+                    continue;
+                }
                 let neighbor = self.get_poly(neighbor_id)?;
                 let neighbor_centroid = neighbor.centroid();
-                let edge_cost = dist2d(current_centroid, neighbor_centroid);
+                let edge_cost = current_centroid.distance(neighbor_centroid);
                 let tentative_g = current_g + edge_cost;
 
                 let prev_g = g_score.get(&neighbor_id).copied().unwrap_or(f32::INFINITY);
                 if tentative_g < prev_g {
                     came_from.insert(neighbor_id, current.id);
                     g_score.insert(neighbor_id, tentative_g);
-                    let h = dist2d(neighbor_centroid, goal_centroid);
+                    let h = neighbor_centroid.distance(goal_centroid);
                     open.push(MeshNode {
                         id: neighbor_id,
                         f_score: tentative_g + h,
@@ -179,13 +182,6 @@ impl NavMesh {
         path.reverse();
         path
     }
-}
-
-#[inline]
-fn dist2d(a: [f32; 2], b: [f32; 2]) -> f32 {
-    let dx = b[0] - a[0];
-    let dy = b[1] - a[1];
-    (dx * dx + dy * dy).sqrt()
 }
 
 #[derive(Clone, Copy)]
@@ -230,12 +226,22 @@ mod tests {
         let mut mesh = NavMesh::new();
         mesh.add_poly(NavPoly {
             id: NavPolyId(0),
-            vertices: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+            vertices: vec![
+                Vec2::ZERO,
+                Vec2::new(1.0, 0.0),
+                Vec2::ONE,
+                Vec2::new(0.0, 1.0),
+            ],
             neighbors: vec![NavPolyId(1)],
         });
         mesh.add_poly(NavPoly {
             id: NavPolyId(1),
-            vertices: vec![[1.0, 0.0], [2.0, 0.0], [2.0, 1.0], [1.0, 1.0]],
+            vertices: vec![
+                Vec2::new(1.0, 0.0),
+                Vec2::new(2.0, 0.0),
+                Vec2::new(2.0, 1.0),
+                Vec2::ONE,
+            ],
             neighbors: vec![NavPolyId(0)],
         });
         mesh
@@ -245,60 +251,75 @@ mod tests {
     fn centroid() {
         let poly = NavPoly {
             id: NavPolyId(0),
-            vertices: vec![[0.0, 0.0], [2.0, 0.0], [2.0, 2.0], [0.0, 2.0]],
+            vertices: vec![
+                Vec2::ZERO,
+                Vec2::new(2.0, 0.0),
+                Vec2::new(2.0, 2.0),
+                Vec2::new(0.0, 2.0),
+            ],
             neighbors: vec![],
         };
         let c = poly.centroid();
-        assert!((c[0] - 1.0).abs() < f32::EPSILON);
-        assert!((c[1] - 1.0).abs() < f32::EPSILON);
+        assert!((c.x - 1.0).abs() < f32::EPSILON);
+        assert!((c.y - 1.0).abs() < f32::EPSILON);
     }
 
     #[test]
     fn contains_point_inside() {
         let poly = NavPoly {
             id: NavPolyId(0),
-            vertices: vec![[0.0, 0.0], [4.0, 0.0], [4.0, 4.0], [0.0, 4.0]],
+            vertices: vec![
+                Vec2::ZERO,
+                Vec2::new(4.0, 0.0),
+                Vec2::new(4.0, 4.0),
+                Vec2::new(0.0, 4.0),
+            ],
             neighbors: vec![],
         };
-        assert!(poly.contains_point([2.0, 2.0]));
+        assert!(poly.contains_point(Vec2::new(2.0, 2.0)));
     }
 
     #[test]
     fn contains_point_outside() {
         let poly = NavPoly {
             id: NavPolyId(0),
-            vertices: vec![[0.0, 0.0], [4.0, 0.0], [4.0, 4.0], [0.0, 4.0]],
+            vertices: vec![
+                Vec2::ZERO,
+                Vec2::new(4.0, 0.0),
+                Vec2::new(4.0, 4.0),
+                Vec2::new(0.0, 4.0),
+            ],
             neighbors: vec![],
         };
-        assert!(!poly.contains_point([5.0, 5.0]));
+        assert!(!poly.contains_point(Vec2::new(5.0, 5.0)));
     }
 
     #[test]
     fn find_poly_at() {
         let mesh = make_square_mesh();
-        assert_eq!(mesh.find_poly_at([0.5, 0.5]), Some(NavPolyId(0)));
-        assert_eq!(mesh.find_poly_at([1.5, 0.5]), Some(NavPolyId(1)));
-        assert_eq!(mesh.find_poly_at([3.0, 0.5]), None);
+        assert_eq!(mesh.find_poly_at(Vec2::new(0.5, 0.5)), Some(NavPolyId(0)));
+        assert_eq!(mesh.find_poly_at(Vec2::new(1.5, 0.5)), Some(NavPolyId(1)));
+        assert_eq!(mesh.find_poly_at(Vec2::new(3.0, 0.5)), None);
     }
 
     #[test]
     fn navmesh_path_same_poly() {
         let mesh = make_square_mesh();
-        let path = mesh.find_path([0.2, 0.2], [0.8, 0.8]);
+        let path = mesh.find_path(Vec2::new(0.2, 0.2), Vec2::new(0.8, 0.8));
         assert_eq!(path, Some(vec![NavPolyId(0)]));
     }
 
     #[test]
     fn navmesh_path_across_polys() {
         let mesh = make_square_mesh();
-        let path = mesh.find_path([0.5, 0.5], [1.5, 0.5]);
+        let path = mesh.find_path(Vec2::new(0.5, 0.5), Vec2::new(1.5, 0.5));
         assert_eq!(path, Some(vec![NavPolyId(0), NavPolyId(1)]));
     }
 
     #[test]
     fn navmesh_path_unreachable() {
         let mesh = make_square_mesh();
-        let path = mesh.find_path([0.5, 0.5], [5.0, 5.0]);
+        let path = mesh.find_path(Vec2::new(0.5, 0.5), Vec2::new(5.0, 5.0));
         assert!(path.is_none());
     }
 
@@ -315,18 +336,18 @@ mod tests {
             vertices: vec![],
             neighbors: vec![],
         };
-        assert_eq!(poly.centroid(), [0.0, 0.0]);
+        assert_eq!(poly.centroid(), Vec2::ZERO);
     }
 
     #[test]
     fn triangle_contains() {
         let tri = NavPoly {
             id: NavPolyId(0),
-            vertices: vec![[0.0, 0.0], [4.0, 0.0], [2.0, 4.0]],
+            vertices: vec![Vec2::ZERO, Vec2::new(4.0, 0.0), Vec2::new(2.0, 4.0)],
             neighbors: vec![],
         };
-        assert!(tri.contains_point([2.0, 1.0]));
-        assert!(!tri.contains_point([0.0, 4.0]));
+        assert!(tri.contains_point(Vec2::new(2.0, 1.0)));
+        assert!(!tri.contains_point(Vec2::new(0.0, 4.0)));
     }
 
     #[test]
@@ -349,25 +370,25 @@ mod tests {
         // A polygon with < 3 vertices should never contain any point
         let line = NavPoly {
             id: NavPolyId(0),
-            vertices: vec![[0.0, 0.0], [1.0, 1.0]],
+            vertices: vec![Vec2::ZERO, Vec2::ONE],
             neighbors: vec![],
         };
-        assert!(!line.contains_point([0.5, 0.5]));
+        assert!(!line.contains_point(Vec2::new(0.5, 0.5)));
 
         let point = NavPoly {
             id: NavPolyId(1),
-            vertices: vec![[0.0, 0.0]],
+            vertices: vec![Vec2::ZERO],
             neighbors: vec![],
         };
-        assert!(!point.contains_point([0.0, 0.0]));
+        assert!(!point.contains_point(Vec2::ZERO));
     }
 
     #[test]
     fn empty_mesh() {
         let mesh = NavMesh::new();
         assert_eq!(mesh.poly_count(), 0);
-        assert!(mesh.find_poly_at([0.0, 0.0]).is_none());
-        assert!(mesh.find_path([0.0, 0.0], [1.0, 1.0]).is_none());
+        assert!(mesh.find_poly_at(Vec2::ZERO).is_none());
+        assert!(mesh.find_path(Vec2::ZERO, Vec2::ONE).is_none());
     }
 
     #[test]
@@ -375,18 +396,30 @@ mod tests {
         let mut mesh = NavMesh::new();
         mesh.add_poly(NavPoly {
             id: NavPolyId(0),
-            vertices: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
-            neighbors: vec![], // no connections
+            vertices: vec![
+                Vec2::ZERO,
+                Vec2::new(1.0, 0.0),
+                Vec2::ONE,
+                Vec2::new(0.0, 1.0),
+            ],
+            neighbors: vec![],
         });
         mesh.add_poly(NavPoly {
             id: NavPolyId(1),
-            vertices: vec![[10.0, 10.0], [11.0, 10.0], [11.0, 11.0], [10.0, 11.0]],
-            neighbors: vec![], // no connections
+            vertices: vec![
+                Vec2::new(10.0, 10.0),
+                Vec2::new(11.0, 10.0),
+                Vec2::new(11.0, 11.0),
+                Vec2::new(10.0, 11.0),
+            ],
+            neighbors: vec![],
         });
-        // Both exist but no path between them
-        assert!(mesh.find_poly_at([0.5, 0.5]).is_some());
-        assert!(mesh.find_poly_at([10.5, 10.5]).is_some());
-        assert!(mesh.find_path([0.5, 0.5], [10.5, 10.5]).is_none());
+        assert!(mesh.find_poly_at(Vec2::new(0.5, 0.5)).is_some());
+        assert!(mesh.find_poly_at(Vec2::new(10.5, 10.5)).is_some());
+        assert!(
+            mesh.find_path(Vec2::new(0.5, 0.5), Vec2::new(10.5, 10.5))
+                .is_none()
+        );
     }
 
     #[test]

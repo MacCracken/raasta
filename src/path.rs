@@ -1,5 +1,6 @@
 //! Path request/result types.
 
+use hisab::Vec2;
 use serde::{Deserialize, Serialize};
 
 /// Status of a pathfinding request.
@@ -20,14 +21,14 @@ pub enum PathStatus {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PathRequest {
     /// Start position in world space.
-    pub start: [f32; 2],
+    pub start: Vec2,
     /// Goal position in world space.
-    pub goal: [f32; 2],
+    pub goal: Vec2,
 }
 
 impl PathRequest {
     #[must_use]
-    pub fn new(start: [f32; 2], goal: [f32; 2]) -> Self {
+    pub fn new(start: Vec2, goal: Vec2) -> Self {
         Self { start, goal }
     }
 }
@@ -37,7 +38,7 @@ impl PathRequest {
 pub struct PathResult {
     pub status: PathStatus,
     /// Waypoints from start to goal in world space.
-    pub waypoints: Vec<[f32; 2]>,
+    pub waypoints: Vec<Vec2>,
     /// Total path length.
     pub length: f32,
 }
@@ -45,15 +46,8 @@ pub struct PathResult {
 impl PathResult {
     /// Create a successful path result.
     #[must_use]
-    pub fn found(waypoints: Vec<[f32; 2]>) -> Self {
-        let length = waypoints
-            .windows(2)
-            .map(|w| {
-                let dx = w[1][0] - w[0][0];
-                let dy = w[1][1] - w[0][1];
-                (dx * dx + dy * dy).sqrt()
-            })
-            .sum();
+    pub fn found(waypoints: Vec<Vec2>) -> Self {
+        let length = waypoints.windows(2).map(|w| (w[1] - w[0]).length()).sum();
         Self {
             status: PathStatus::Found,
             waypoints,
@@ -94,7 +88,7 @@ mod tests {
 
     #[test]
     fn path_result_found() {
-        let r = PathResult::found(vec![[0.0, 0.0], [3.0, 4.0]]);
+        let r = PathResult::found(vec![Vec2::ZERO, Vec2::new(3.0, 4.0)]);
         assert!(r.is_found());
         assert!((r.length - 5.0).abs() < 0.01);
     }
@@ -114,20 +108,20 @@ mod tests {
 
     #[test]
     fn path_request_new() {
-        let req = PathRequest::new([1.0, 2.0], [3.0, 4.0]);
-        assert_eq!(req.start, [1.0, 2.0]);
-        assert_eq!(req.goal, [3.0, 4.0]);
+        let req = PathRequest::new(Vec2::new(1.0, 2.0), Vec2::new(3.0, 4.0));
+        assert_eq!(req.start, Vec2::new(1.0, 2.0));
+        assert_eq!(req.goal, Vec2::new(3.0, 4.0));
     }
 
     #[test]
     fn path_result_zero_length() {
-        let r = PathResult::found(vec![[5.0, 5.0]]);
+        let r = PathResult::found(vec![Vec2::new(5.0, 5.0)]);
         assert!((r.length - 0.0).abs() < f32::EPSILON);
     }
 
     #[test]
     fn path_result_serde_roundtrip() {
-        let r = PathResult::found(vec![[0.0, 0.0], [1.0, 1.0]]);
+        let r = PathResult::found(vec![Vec2::ZERO, Vec2::ONE]);
         let json = serde_json::to_string(&r).unwrap();
         let deserialized: PathResult = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.status, PathStatus::Found);
@@ -137,7 +131,7 @@ mod tests {
     #[test]
     fn path_result_multi_segment_length() {
         // 3-4-5 triangle: (0,0) -> (3,0) -> (3,4)
-        let r = PathResult::found(vec![[0.0, 0.0], [3.0, 0.0], [3.0, 4.0]]);
+        let r = PathResult::found(vec![Vec2::ZERO, Vec2::new(3.0, 0.0), Vec2::new(3.0, 4.0)]);
         // Length should be 3 + 4 = 7
         assert!((r.length - 7.0).abs() < 0.01);
     }

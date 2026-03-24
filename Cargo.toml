@@ -19,7 +19,7 @@ logging = ["dep:tracing-subscriber"]
 
 [dependencies]
 # Math — hisab re-exports glam types (Vec2, Vec3, etc.)
-hisab = "0.22"
+hisab = { version = "0.24", default-features = false, features = ["transforms"] }
 serde = { version = "1", features = ["derive"] }
 tracing = "0.1"
 thiserror = "2"

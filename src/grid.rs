@@ -3,6 +3,7 @@
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
+use hisab::Vec2;
 use serde::{Deserialize, Serialize};
 
 /// A position on the navigation grid.
@@ -37,6 +38,7 @@ impl GridPos {
 }
 
 /// A 2D navigation grid with walkability and movement costs.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NavGrid {
     width: usize,
     height: usize,
@@ -51,9 +53,13 @@ pub struct NavGrid {
 
 impl NavGrid {
     /// Create a new grid where all cells are walkable.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `width * height` overflows `usize`.
     #[must_use]
     pub fn new(width: usize, height: usize, cell_size: f32) -> Self {
-        let len = width * height;
+        let len = width.checked_mul(height).expect("grid dimensions overflow");
         Self {
             width,
             height,
@@ -111,18 +117,19 @@ impl NavGrid {
 
     /// Convert grid position to world position (center of cell).
     #[must_use]
-    pub fn grid_to_world(&self, pos: GridPos) -> (f32, f32) {
-        let x = (pos.x as f32 + 0.5) * self.cell_size;
-        let y = (pos.y as f32 + 0.5) * self.cell_size;
-        (x, y)
+    pub fn grid_to_world(&self, pos: GridPos) -> Vec2 {
+        Vec2::new(
+            (pos.x as f32 + 0.5) * self.cell_size,
+            (pos.y as f32 + 0.5) * self.cell_size,
+        )
     }
 
     /// Convert world position to grid position.
     #[must_use]
-    pub fn world_to_grid(&self, wx: f32, wy: f32) -> GridPos {
+    pub fn world_to_grid(&self, world: Vec2) -> GridPos {
         GridPos::new(
-            (wx / self.cell_size).floor() as i32,
-            (wy / self.cell_size).floor() as i32,
+            (world.x / self.cell_size).floor() as i32,
+            (world.y / self.cell_size).floor() as i32,
         )
     }
 
@@ -175,7 +182,7 @@ impl NavGrid {
             let count = self.neighbors_into(cx, cy, &mut neighbors_buf);
 
             for &(nx, ny, move_cost) in &neighbors_buf[..count] {
-                let n_idx = self.index(nx, ny).unwrap_or(0);
+                let n_idx = self.index_unchecked(nx, ny);
                 if closed[n_idx] {
                     continue;
                 }
@@ -238,7 +245,7 @@ impl NavGrid {
             let count = self.neighbors_into(cx, cy, &mut neighbors_buf);
 
             for &(nx, ny, move_cost) in &neighbors_buf[..count] {
-                let n_idx = self.index(nx, ny).unwrap_or(0);
+                let n_idx = self.index_unchecked(nx, ny);
                 if closed[n_idx] {
                     continue;
                 }
@@ -256,7 +263,7 @@ impl NavGrid {
         // Compute directions: each cell points toward its lowest-cost neighbor
         for y in 0..self.height as i32 {
             for x in 0..self.width as i32 {
-                let idx = self.index(x, y).unwrap_or(0);
+                let idx = self.index_unchecked(x, y);
                 if idx == goal_idx || dist[idx] == f32::INFINITY {
                     continue;
                 }
@@ -264,7 +271,7 @@ impl NavGrid {
                 let mut best_dist = dist[idx];
                 let count = self.neighbors_into(x, y, &mut neighbors_buf);
                 for &(nx, ny, _) in &neighbors_buf[..count] {
-                    let n_idx = self.index(nx, ny).unwrap_or(0);
+                    let n_idx = self.index_unchecked(nx, ny);
                     if dist[n_idx] < best_dist {
                         best_dist = dist[n_idx];
                         best_dir = (nx - x, ny - y);
@@ -284,6 +291,18 @@ impl NavGrid {
         } else {
             None
         }
+    }
+
+    /// Index for coordinates known to be in-bounds (from `neighbors_into` or
+    /// bounded iteration). Debug-asserts validity; returns 0 in release if
+    /// the invariant is somehow broken (callers already filter via `closed`).
+    #[inline]
+    fn index_unchecked(&self, x: i32, y: i32) -> usize {
+        debug_assert!(
+            x >= 0 && y >= 0 && (x as usize) < self.width && (y as usize) < self.height,
+            "index_unchecked called with out-of-bounds ({x}, {y})"
+        );
+        y as usize * self.width + x as usize
     }
 
     /// Write walkable neighbors into `buf` and return the count.
@@ -473,15 +492,15 @@ mod tests {
     #[test]
     fn grid_to_world_conversion() {
         let grid = NavGrid::new(10, 10, 2.0);
-        let (wx, wy) = grid.grid_to_world(GridPos::new(3, 4));
-        assert!((wx - 7.0).abs() < f32::EPSILON);
-        assert!((wy - 9.0).abs() < f32::EPSILON);
+        let w = grid.grid_to_world(GridPos::new(3, 4));
+        assert!((w.x - 7.0).abs() < f32::EPSILON);
+        assert!((w.y - 9.0).abs() < f32::EPSILON);
     }
 
     #[test]
     fn world_to_grid_conversion() {
         let grid = NavGrid::new(10, 10, 2.0);
-        let pos = grid.world_to_grid(7.5, 9.5);
+        let pos = grid.world_to_grid(Vec2::new(7.5, 9.5));
         assert_eq!(pos, GridPos::new(3, 4));
     }
 
@@ -561,8 +580,14 @@ mod tests {
     #[test]
     fn out_of_bounds_start_goal() {
         let grid = NavGrid::new(5, 5, 1.0);
-        assert!(grid.find_path(GridPos::new(-1, 0), GridPos::new(4, 4)).is_none());
-        assert!(grid.find_path(GridPos::new(0, 0), GridPos::new(5, 5)).is_none());
+        assert!(
+            grid.find_path(GridPos::new(-1, 0), GridPos::new(4, 4))
+                .is_none()
+        );
+        assert!(
+            grid.find_path(GridPos::new(0, 0), GridPos::new(5, 5))
+                .is_none()
+        );
     }
 
     #[test]
@@ -624,5 +649,29 @@ mod tests {
         let path = path.unwrap();
         // Path should prefer going through (1,1) which has default cost
         assert!(path.contains(&GridPos::new(1, 1)));
+    }
+
+    #[test]
+    fn navgrid_serde_roundtrip() {
+        let mut grid = NavGrid::new(5, 5, 2.0);
+        grid.set_walkable(2, 2, false);
+        grid.set_cost(1, 1, 3.0);
+        grid.allow_diagonal = false;
+
+        let json = serde_json::to_string(&grid).unwrap();
+        let deserialized: NavGrid = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(deserialized.width(), 5);
+        assert_eq!(deserialized.height(), 5);
+        assert!((deserialized.cell_size() - 2.0).abs() < f32::EPSILON);
+        assert!(!deserialized.is_walkable(2, 2));
+        assert!((deserialized.cost(1, 1) - 3.0).abs() < f32::EPSILON);
+        assert!(!deserialized.allow_diagonal);
+    }
+
+    #[test]
+    #[should_panic(expected = "grid dimensions overflow")]
+    fn grid_overflow_panics() {
+        let _ = NavGrid::new(usize::MAX, 2, 1.0);
     }
 }

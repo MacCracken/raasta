@@ -36,6 +36,9 @@ mod steer;
 #[cfg(feature = "logging")]
 pub mod logging;
 
+// Re-export hisab math types used in our public API
+pub use hisab::Vec2;
+
 pub use grid::{GridPos, NavGrid};
 pub use mesh::{NavMesh, NavPoly, NavPolyId};
 pub use path::{PathRequest, PathResult, PathStatus};

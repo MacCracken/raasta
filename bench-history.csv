@@ -19,3 +19,13 @@ timestamp,commit,branch,benchmark,estimate_ns
 2026-03-24T22:15:14Z,e822556,main,steer_seek,0.7520
 2026-03-24T22:15:14Z,e822556,main,steer_arrive,0.7208
 2026-03-24T22:15:14Z,e822556,main,grid_astar_batch_100,776970.0000
+2026-03-24T22:43:50Z,2c598ac,main,grid_astar_10x10,1071.9000
+2026-03-24T22:43:50Z,2c598ac,main,grid_astar_50x50,5524.2000
+2026-03-24T22:43:50Z,2c598ac,main,grid_astar_100x100,12955.0000
+2026-03-24T22:43:50Z,2c598ac,main,grid_astar_50x50_obstacles,36881.0000
+2026-03-24T22:43:50Z,2c598ac,main,flow_field_20x20,32687.0000
+2026-03-24T22:43:50Z,2c598ac,main,flow_field_50x50,241170.0000
+2026-03-24T22:43:50Z,2c598ac,main,navmesh_path_10_polys,1854.9000
+2026-03-24T22:43:50Z,2c598ac,main,steer_seek,0.5033
+2026-03-24T22:43:50Z,2c598ac,main,steer_arrive,0.4910
+2026-03-24T22:43:50Z,2c598ac,main,grid_astar_batch_100,856170.0000
