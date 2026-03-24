@@ -224,6 +224,9 @@ pub struct AbstractGraph {
     node_clusters: Vec<ClusterId>,
     /// Adjacency list.
     edges: Vec<Vec<AbstractEdge>>,
+    /// Cached intra-cluster paths: (node_a, node_b) → grid path.
+    /// Keyed with (min_id, max_id) for symmetry.
+    path_cache: std::collections::HashMap<(u32, u32), Vec<GridPos>>,
 }
 
 impl AbstractGraph {
@@ -234,6 +237,7 @@ impl AbstractGraph {
             node_positions: Vec::new(),
             node_clusters: Vec::new(),
             edges: Vec::new(),
+            path_cache: std::collections::HashMap::new(),
         };
 
         // For each entrance, pick a representative cell on each side
@@ -264,16 +268,20 @@ impl AbstractGraph {
         }
 
         // Intra-cluster edges: for each cluster, connect all its entrance nodes
-        // via A* within the cluster bounds.
+        // via A* within the cluster bounds. Cache the paths for O(1) refinement.
         for nodes in cluster_nodes.values() {
             for i in 0..nodes.len() {
                 for j in (i + 1)..nodes.len() {
                     let pos_a = graph.node_positions[nodes[i].0 as usize];
                     let pos_b = graph.node_positions[nodes[j].0 as usize];
 
-                    if let Some(cost) = Self::intra_cluster_cost(grid, pos_a, pos_b) {
+                    if let Some(path) = grid.find_path(pos_a, pos_b) {
+                        let cost: f32 = path.windows(2).map(|w| w[0].octile_distance(w[1])).sum();
                         graph.add_edge(nodes[i], nodes[j], cost);
                         graph.add_edge(nodes[j], nodes[i], cost);
+
+                        let key = Self::cache_key(nodes[i], nodes[j]);
+                        graph.path_cache.insert(key, path);
                     }
                 }
             }
@@ -316,6 +324,11 @@ impl AbstractGraph {
 
     fn add_edge(&mut self, from: AbstractNodeId, to: AbstractNodeId, cost: f32) {
         self.edges[from.0 as usize].push(AbstractEdge { to, cost });
+    }
+
+    /// Symmetric cache key — always (min, max).
+    fn cache_key(a: AbstractNodeId, b: AbstractNodeId) -> (u32, u32) {
+        if a.0 <= b.0 { (a.0, b.0) } else { (b.0, a.0) }
     }
 
     /// Find a path on the abstract graph using A*.
@@ -364,15 +377,17 @@ impl AbstractGraph {
 
             // Connect start to nodes in its cluster
             if node_cluster == start_cluster
-                && let Some(cost) = Self::intra_cluster_cost(grid, start, node_pos)
+                && let Some(path) = grid.find_path(start, node_pos)
             {
+                let cost: f32 = path.windows(2).map(|w| w[0].octile_distance(w[1])).sum();
                 start_edges.push(AbstractEdge { to: node_id, cost });
             }
 
             // Connect nodes in goal's cluster to goal
             if node_cluster == goal_cluster
-                && let Some(cost) = Self::intra_cluster_cost(grid, node_pos, goal)
+                && let Some(path) = grid.find_path(node_pos, goal)
             {
+                let cost: f32 = path.windows(2).map(|w| w[0].octile_distance(w[1])).sum();
                 goal_edges_incoming.push((node_id, cost));
             }
         }
@@ -481,8 +496,10 @@ impl AbstractGraph {
         path
     }
 
-    /// Refine an abstract path into a full grid path by connecting
-    /// consecutive abstract nodes via base-grid A*.
+    /// Refine an abstract path into a full grid path.
+    ///
+    /// Uses cached intra-cluster paths for known node pairs (O(1) lookup).
+    /// Only calls A* for start/goal connections to entrance nodes.
     fn refine_path(
         &self,
         grid: &NavGrid,
@@ -494,40 +511,54 @@ impl AbstractGraph {
             return grid.find_path(start, goal);
         }
 
-        let n = self.node_positions.len();
+        let n = self.node_positions.len() as u32;
         let mut full_path: Vec<GridPos> = Vec::new();
 
         for w in abstract_path.windows(2) {
-            let from_pos = if w[0].0 as usize >= n {
-                start
-            } else {
-                self.node_positions[w[0].0 as usize]
-            };
-            let to_pos = if w[1].0 as usize >= n {
-                goal
-            } else {
-                self.node_positions[w[1].0 as usize]
-            };
+            let is_temp_a = w[0].0 >= n;
+            let is_temp_b = w[1].0 >= n;
 
-            let segment = grid.find_path(from_pos, to_pos)?;
+            let segment = if !is_temp_a && !is_temp_b {
+                // Both are permanent nodes — check cache first
+                let key = Self::cache_key(w[0], w[1]);
+                if let Some(cached) = self.path_cache.get(&key) {
+                    // Cache stores A→B; if we need B→A, reverse it
+                    if key.0 == w[0].0 {
+                        cached.clone()
+                    } else {
+                        let mut rev = cached.clone();
+                        rev.reverse();
+                        rev
+                    }
+                } else {
+                    // Inter-cluster edge (adjacent cells) — direct step
+                    let from_pos = self.node_positions[w[0].0 as usize];
+                    let to_pos = self.node_positions[w[1].0 as usize];
+                    vec![from_pos, to_pos]
+                }
+            } else {
+                // Temporary node (start or goal) — A* on base grid
+                let from_pos = if is_temp_a {
+                    start
+                } else {
+                    self.node_positions[w[0].0 as usize]
+                };
+                let to_pos = if is_temp_b {
+                    goal
+                } else {
+                    self.node_positions[w[1].0 as usize]
+                };
+                grid.find_path(from_pos, to_pos)?
+            };
 
             if full_path.is_empty() {
                 full_path.extend_from_slice(&segment);
-            } else {
-                // Skip first cell (duplicate of previous segment's last)
+            } else if segment.len() > 1 {
                 full_path.extend_from_slice(&segment[1..]);
             }
         }
 
         Some(full_path)
-    }
-
-    /// Compute A* path cost between two cells on the grid.
-    /// Returns None if no path exists.
-    fn intra_cluster_cost(grid: &NavGrid, from: GridPos, to: GridPos) -> Option<f32> {
-        let path = grid.find_path(from, to)?;
-        let cost: f32 = path.windows(2).map(|w| w[0].octile_distance(w[1])).sum();
-        Some(cost)
     }
 }
 
