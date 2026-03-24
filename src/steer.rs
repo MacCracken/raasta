@@ -7,13 +7,9 @@ use serde::{Deserialize, Serialize};
 #[non_exhaustive]
 pub enum SteerBehavior {
     /// Move toward a target position.
-    Seek {
-        target: [f32; 2],
-    },
+    Seek { target: [f32; 2] },
     /// Move away from a target position.
-    Flee {
-        target: [f32; 2],
-    },
+    Flee { target: [f32; 2] },
     /// Move toward a target, slowing down as it approaches.
     Arrive {
         target: [f32; 2],
@@ -30,13 +26,14 @@ pub struct SteerOutput {
 }
 
 impl SteerOutput {
+    #[must_use]
     pub fn new(vx: f32, vy: f32) -> Self {
-        Self {
-            velocity: [vx, vy],
-        }
+        Self { velocity: [vx, vy] }
     }
 
     /// Magnitude of the velocity.
+    #[inline]
+    #[must_use]
     pub fn speed(&self) -> f32 {
         let [vx, vy] = self.velocity;
         (vx * vx + vy * vy).sqrt()
@@ -47,11 +44,9 @@ impl SteerOutput {
 ///
 /// - `position`: current agent position
 /// - `max_speed`: maximum speed the agent can move
-pub fn compute_steer(
-    behavior: &SteerBehavior,
-    position: [f32; 2],
-    max_speed: f32,
-) -> SteerOutput {
+#[inline]
+#[must_use]
+pub fn compute_steer(behavior: &SteerBehavior, position: [f32; 2], max_speed: f32) -> SteerOutput {
     match behavior {
         SteerBehavior::Seek { target } => {
             let dx = target[0] - position[0];
@@ -162,25 +157,13 @@ mod tests {
 
     #[test]
     fn seek_at_target() {
-        let out = compute_steer(
-            &SteerBehavior::Seek {
-                target: [0.0, 0.0],
-            },
-            [0.0, 0.0],
-            5.0,
-        );
+        let out = compute_steer(&SteerBehavior::Seek { target: [0.0, 0.0] }, [0.0, 0.0], 5.0);
         assert!(out.speed() < f32::EPSILON);
     }
 
     #[test]
     fn flee_at_target() {
-        let out = compute_steer(
-            &SteerBehavior::Flee {
-                target: [0.0, 0.0],
-            },
-            [0.0, 0.0],
-            5.0,
-        );
+        let out = compute_steer(&SteerBehavior::Flee { target: [0.0, 0.0] }, [0.0, 0.0], 5.0);
         assert!(out.speed() < f32::EPSILON);
     }
 
@@ -203,5 +186,51 @@ mod tests {
         assert!((out.speed() - 1.0).abs() < 0.01);
         // Direction should be ~45 degrees (equal x and y)
         assert!((out.velocity[0] - out.velocity[1]).abs() < 0.01);
+    }
+
+    #[test]
+    fn flee_negative_coords() {
+        let out = compute_steer(
+            &SteerBehavior::Flee {
+                target: [-10.0, -10.0],
+            },
+            [0.0, 0.0],
+            5.0,
+        );
+        // Should flee in positive direction
+        assert!(out.velocity[0] > 0.0);
+        assert!(out.velocity[1] > 0.0);
+        assert!((out.speed() - 5.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn arrive_at_slow_radius_boundary() {
+        let out = compute_steer(
+            &SteerBehavior::Arrive {
+                target: [10.0, 0.0],
+                slow_radius: 10.0,
+            },
+            [0.0, 0.0],
+            10.0,
+        );
+        // Exactly at slow_radius distance — speed should equal max_speed
+        assert!((out.speed() - 10.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn steer_output_zero_speed() {
+        let out = SteerOutput::default();
+        assert!(out.speed() < f32::EPSILON);
+    }
+
+    #[test]
+    fn steer_serde_roundtrip() {
+        let b = SteerBehavior::Arrive {
+            target: [1.0, 2.0],
+            slow_radius: 5.0,
+        };
+        let json = serde_json::to_string(&b).unwrap();
+        let deserialized: SteerBehavior = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, b);
     }
 }

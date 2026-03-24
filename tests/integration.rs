@@ -117,7 +117,9 @@ fn steering_follow_path() {
 #[test]
 fn smooth_grid_path() {
     let grid = NavGrid::new(10, 10, 1.0);
-    let path = grid.find_path(GridPos::new(0, 0), GridPos::new(9, 9)).unwrap();
+    let path = grid
+        .find_path(GridPos::new(0, 0), GridPos::new(9, 9))
+        .unwrap();
 
     // Convert to world positions
     let world_path: Vec<[f32; 2]> = path

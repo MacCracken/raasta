@@ -8,6 +8,7 @@
 ///
 /// This is a simplified version that works on the waypoint list directly.
 /// A full funnel algorithm would work on portal edges between navmesh polygons.
+#[must_use]
 pub fn funnel_smooth(waypoints: &[[f32; 2]]) -> Vec<[f32; 2]> {
     if waypoints.len() <= 2 {
         return waypoints.to_vec();
@@ -105,5 +106,23 @@ mod tests {
         let result = funnel_smooth(&input);
         assert_eq!(*result.first().unwrap(), [0.0, 0.0]);
         assert_eq!(*result.last().unwrap(), [4.0, 0.0]);
+    }
+
+    #[test]
+    fn smooth_u_turn() {
+        // Path goes right, then reverses left — u-turn must be kept
+        let input = vec![[0.0, 0.0], [5.0, 0.0], [0.0, 0.0]];
+        let result = funnel_smooth(&input);
+        assert_eq!(result.len(), 3);
+    }
+
+    #[test]
+    fn smooth_long_collinear() {
+        // 20 collinear points should simplify to just 2
+        let input: Vec<[f32; 2]> = (0..20).map(|i| [i as f32, 0.0]).collect();
+        let result = funnel_smooth(&input);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0], [0.0, 0.0]);
+        assert_eq!(result[1], [19.0, 0.0]);
     }
 }

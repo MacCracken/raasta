@@ -23,7 +23,10 @@ fn main() {
             println!("Path found! {} steps", path.len());
             for (i, pos) in path.iter().enumerate() {
                 let (wx, wy) = grid.grid_to_world(*pos);
-                println!("  [{i}] grid({}, {}) -> world({wx:.1}, {wy:.1})", pos.x, pos.y);
+                println!(
+                    "  [{i}] grid({}, {}) -> world({wx:.1}, {wy:.1})",
+                    pos.x, pos.y
+                );
             }
         }
         None => println!("No path found!"),

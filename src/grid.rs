@@ -1,7 +1,7 @@
 //! Grid-based navigation and A* pathfinding.
 
-use std::collections::BinaryHeap;
 use std::cmp::Ordering;
+use std::collections::BinaryHeap;
 
 use serde::{Deserialize, Serialize};
 
@@ -13,18 +13,21 @@ pub struct GridPos {
 }
 
 impl GridPos {
+    #[must_use]
     pub fn new(x: i32, y: i32) -> Self {
         Self { x, y }
     }
 
     /// Manhattan distance to another position.
     #[inline]
+    #[must_use]
     pub fn manhattan_distance(self, other: GridPos) -> i32 {
         (self.x - other.x).abs() + (self.y - other.y).abs()
     }
 
     /// Octile distance (allows diagonal movement).
     #[inline]
+    #[must_use]
     pub fn octile_distance(self, other: GridPos) -> f32 {
         let dx = (self.x - other.x).abs() as f32;
         let dy = (self.y - other.y).abs() as f32;
@@ -48,6 +51,7 @@ pub struct NavGrid {
 
 impl NavGrid {
     /// Create a new grid where all cells are walkable.
+    #[must_use]
     pub fn new(width: usize, height: usize, cell_size: f32) -> Self {
         let len = width * height;
         Self {
@@ -60,14 +64,17 @@ impl NavGrid {
         }
     }
 
+    #[must_use]
     pub fn width(&self) -> usize {
         self.width
     }
 
+    #[must_use]
     pub fn height(&self) -> usize {
         self.height
     }
 
+    #[must_use]
     pub fn cell_size(&self) -> f32 {
         self.cell_size
     }
@@ -80,6 +87,7 @@ impl NavGrid {
     }
 
     /// Check if a cell is walkable.
+    #[must_use]
     pub fn is_walkable(&self, x: i32, y: i32) -> bool {
         self.index(x, y)
             .map(|idx| self.walkable[idx])
@@ -94,6 +102,7 @@ impl NavGrid {
     }
 
     /// Get the movement cost for a cell.
+    #[must_use]
     pub fn cost(&self, x: i32, y: i32) -> f32 {
         self.index(x, y)
             .map(|idx| self.costs[idx])
@@ -101,6 +110,7 @@ impl NavGrid {
     }
 
     /// Convert grid position to world position (center of cell).
+    #[must_use]
     pub fn grid_to_world(&self, pos: GridPos) -> (f32, f32) {
         let x = (pos.x as f32 + 0.5) * self.cell_size;
         let y = (pos.y as f32 + 0.5) * self.cell_size;
@@ -108,6 +118,7 @@ impl NavGrid {
     }
 
     /// Convert world position to grid position.
+    #[must_use]
     pub fn world_to_grid(&self, wx: f32, wy: f32) -> GridPos {
         GridPos::new(
             (wx / self.cell_size).floor() as i32,
@@ -118,6 +129,7 @@ impl NavGrid {
     /// Find a path from `start` to `goal` using A*.
     ///
     /// Returns `None` if no path exists.
+    #[must_use]
     pub fn find_path(&self, start: GridPos, goal: GridPos) -> Option<Vec<GridPos>> {
         if !self.is_walkable(start.x, start.y) || !self.is_walkable(goal.x, goal.y) {
             return None;
@@ -129,6 +141,7 @@ impl NavGrid {
         let len = self.width * self.height;
         let mut g_score = vec![f32::INFINITY; len];
         let mut came_from: Vec<Option<usize>> = vec![None; len];
+        let mut closed = vec![false; len];
         let mut open = BinaryHeap::new();
 
         let start_idx = self.index(start.x, start.y)?;
@@ -145,16 +158,27 @@ impl NavGrid {
             f_score: h,
         });
 
+        let mut neighbors_buf = [(0i32, 0i32, 0.0f32); 8];
+
         while let Some(current) = open.pop() {
             if current.idx == goal_idx {
                 return Some(self.reconstruct_path(&came_from, goal_idx));
             }
 
+            if closed[current.idx] {
+                continue;
+            }
+            closed[current.idx] = true;
+
             let cx = (current.idx % self.width) as i32;
             let cy = (current.idx / self.width) as i32;
+            let count = self.neighbors_into(cx, cy, &mut neighbors_buf);
 
-            for (nx, ny, move_cost) in self.neighbors(cx, cy) {
-                let n_idx = self.index(nx, ny).unwrap();
+            for &(nx, ny, move_cost) in &neighbors_buf[..count] {
+                let n_idx = self.index(nx, ny).unwrap_or(0);
+                if closed[n_idx] {
+                    continue;
+                }
                 let tentative_g = g_score[current.idx] + move_cost * self.costs[n_idx];
 
                 if tentative_g < g_score[n_idx] {
@@ -181,6 +205,7 @@ impl NavGrid {
     ///
     /// Returns a grid-sized Vec of direction vectors `(dx, dy)` where
     /// `(0, 0)` means the goal cell or unreachable.
+    #[must_use]
     pub fn flow_field(&self, goal: GridPos) -> Vec<(i32, i32)> {
         let len = self.width * self.height;
         let mut dist = vec![f32::INFINITY; len];
@@ -191,20 +216,32 @@ impl NavGrid {
             None => return directions,
         };
 
-        // BFS / Dijkstra from goal
+        // Dijkstra from goal
         dist[goal_idx] = 0.0;
+        let mut closed = vec![false; len];
         let mut queue = BinaryHeap::new();
         queue.push(AStarNode {
             idx: goal_idx,
             f_score: 0.0,
         });
 
+        let mut neighbors_buf = [(0i32, 0i32, 0.0f32); 8];
+
         while let Some(current) = queue.pop() {
+            if closed[current.idx] {
+                continue;
+            }
+            closed[current.idx] = true;
+
             let cx = (current.idx % self.width) as i32;
             let cy = (current.idx / self.width) as i32;
+            let count = self.neighbors_into(cx, cy, &mut neighbors_buf);
 
-            for (nx, ny, move_cost) in self.neighbors(cx, cy) {
-                let n_idx = self.index(nx, ny).unwrap();
+            for &(nx, ny, move_cost) in &neighbors_buf[..count] {
+                let n_idx = self.index(nx, ny).unwrap_or(0);
+                if closed[n_idx] {
+                    continue;
+                }
                 let new_dist = dist[current.idx] + move_cost * self.costs[n_idx];
                 if new_dist < dist[n_idx] {
                     dist[n_idx] = new_dist;
@@ -219,14 +256,15 @@ impl NavGrid {
         // Compute directions: each cell points toward its lowest-cost neighbor
         for y in 0..self.height as i32 {
             for x in 0..self.width as i32 {
-                let idx = self.index(x, y).unwrap();
+                let idx = self.index(x, y).unwrap_or(0);
                 if idx == goal_idx || dist[idx] == f32::INFINITY {
                     continue;
                 }
                 let mut best_dir = (0i32, 0i32);
                 let mut best_dist = dist[idx];
-                for (nx, ny, _) in self.neighbors(x, y) {
-                    let n_idx = self.index(nx, ny).unwrap();
+                let count = self.neighbors_into(x, y, &mut neighbors_buf);
+                for &(nx, ny, _) in &neighbors_buf[..count] {
+                    let n_idx = self.index(nx, ny).unwrap_or(0);
                     if dist[n_idx] < best_dist {
                         best_dist = dist[n_idx];
                         best_dir = (nx - x, ny - y);
@@ -248,20 +286,24 @@ impl NavGrid {
         }
     }
 
-    fn neighbors(&self, x: i32, y: i32) -> Vec<(i32, i32, f32)> {
-        let cardinal = [(0, 1), (0, -1), (1, 0), (-1, 0)];
-        let diagonal = [(1, 1), (1, -1), (-1, 1), (-1, -1)];
+    /// Write walkable neighbors into `buf` and return the count.
+    /// Zero-allocation hot-path alternative to returning a Vec.
+    #[inline]
+    fn neighbors_into(&self, x: i32, y: i32, buf: &mut [(i32, i32, f32); 8]) -> usize {
+        const CARDINAL: [(i32, i32); 4] = [(0, 1), (0, -1), (1, 0), (-1, 0)];
+        const DIAGONAL: [(i32, i32); 4] = [(1, 1), (1, -1), (-1, 1), (-1, -1)];
 
-        let mut result = Vec::with_capacity(8);
-        for (dx, dy) in cardinal {
+        let mut count = 0;
+        for (dx, dy) in CARDINAL {
             let nx = x + dx;
             let ny = y + dy;
             if self.is_walkable(nx, ny) {
-                result.push((nx, ny, 1.0));
+                buf[count] = (nx, ny, 1.0);
+                count += 1;
             }
         }
         if self.allow_diagonal {
-            for (dx, dy) in diagonal {
+            for (dx, dy) in DIAGONAL {
                 let nx = x + dx;
                 let ny = y + dy;
                 // Diagonal requires both adjacent cardinal cells walkable (no corner-cutting)
@@ -269,11 +311,12 @@ impl NavGrid {
                     && self.is_walkable(x + dx, y)
                     && self.is_walkable(x, y + dy)
                 {
-                    result.push((nx, ny, std::f32::consts::SQRT_2));
+                    buf[count] = (nx, ny, std::f32::consts::SQRT_2);
+                    count += 1;
                 }
             }
         }
-        result
+        count
     }
 
     fn reconstruct_path(&self, came_from: &[Option<usize>], goal_idx: usize) -> Vec<GridPos> {
@@ -464,7 +507,10 @@ mod tests {
         let field = grid.flow_field(GridPos::new(4, 4));
         // Cell (0,0) should point toward (4,4) — direction should be (1,1) diagonal
         let (dx, dy) = field[0]; // index for (0,0)
-        assert!(dx > 0 && dy > 0, "expected positive direction, got ({dx},{dy})");
+        assert!(
+            dx > 0 && dy > 0,
+            "expected positive direction, got ({dx},{dy})"
+        );
         // Goal cell should be (0,0)
         let goal_idx = 4 * 5 + 4; // y=4, x=4
         assert_eq!(field[goal_idx], (0, 0));
@@ -503,5 +549,80 @@ mod tests {
         assert_eq!(grid.width(), 10);
         assert_eq!(grid.height(), 20);
         assert!((grid.cell_size() - 0.5).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn grid_1x1() {
+        let grid = NavGrid::new(1, 1, 1.0);
+        let path = grid.find_path(GridPos::new(0, 0), GridPos::new(0, 0));
+        assert_eq!(path, Some(vec![GridPos::new(0, 0)]));
+    }
+
+    #[test]
+    fn out_of_bounds_start_goal() {
+        let grid = NavGrid::new(5, 5, 1.0);
+        assert!(grid.find_path(GridPos::new(-1, 0), GridPos::new(4, 4)).is_none());
+        assert!(grid.find_path(GridPos::new(0, 0), GridPos::new(5, 5)).is_none());
+    }
+
+    #[test]
+    fn flow_field_out_of_bounds_goal() {
+        let grid = NavGrid::new(5, 5, 1.0);
+        let field = grid.flow_field(GridPos::new(-1, -1));
+        // All directions should be (0,0) — no valid goal
+        assert!(field.iter().all(|&d| d == (0, 0)));
+    }
+
+    #[test]
+    fn manhattan_distance_symmetry() {
+        let a = GridPos::new(2, 3);
+        let b = GridPos::new(7, 1);
+        assert_eq!(a.manhattan_distance(b), b.manhattan_distance(a));
+    }
+
+    #[test]
+    fn octile_distance_symmetry() {
+        let a = GridPos::new(0, 0);
+        let b = GridPos::new(5, 3);
+        assert!((a.octile_distance(b) - b.octile_distance(a)).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn set_walkable_out_of_bounds() {
+        let mut grid = NavGrid::new(5, 5, 1.0);
+        // Should not panic
+        grid.set_walkable(-1, 0, false);
+        grid.set_walkable(0, 100, false);
+    }
+
+    #[test]
+    fn set_cost_out_of_bounds() {
+        let mut grid = NavGrid::new(5, 5, 1.0);
+        // Should not panic
+        grid.set_cost(-1, 0, 5.0);
+        grid.set_cost(0, 100, 5.0);
+    }
+
+    #[test]
+    fn gridpos_serde_roundtrip() {
+        let pos = GridPos::new(42, -7);
+        let json = serde_json::to_string(&pos).unwrap();
+        let deserialized: GridPos = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, pos);
+    }
+
+    #[test]
+    fn cost_affects_path_choice() {
+        // 3x1 grid with diagonal off: two paths exist in a 3x3 grid
+        let mut grid = NavGrid::new(3, 3, 1.0);
+        grid.allow_diagonal = false;
+        // Make middle row expensive except the center
+        grid.set_cost(0, 1, 100.0);
+        grid.set_cost(2, 1, 100.0);
+        let path = grid.find_path(GridPos::new(0, 0), GridPos::new(2, 2));
+        assert!(path.is_some());
+        let path = path.unwrap();
+        // Path should prefer going through (1,1) which has default cost
+        assert!(path.contains(&GridPos::new(1, 1)));
     }
 }

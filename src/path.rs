@@ -26,6 +26,7 @@ pub struct PathRequest {
 }
 
 impl PathRequest {
+    #[must_use]
     pub fn new(start: [f32; 2], goal: [f32; 2]) -> Self {
         Self { start, goal }
     }
@@ -43,6 +44,7 @@ pub struct PathResult {
 
 impl PathResult {
     /// Create a successful path result.
+    #[must_use]
     pub fn found(waypoints: Vec<[f32; 2]>) -> Self {
         let length = waypoints
             .windows(2)
@@ -60,6 +62,7 @@ impl PathResult {
     }
 
     /// Create a not-found result.
+    #[must_use]
     pub fn not_found() -> Self {
         Self {
             status: PathStatus::NotFound,
@@ -69,6 +72,7 @@ impl PathResult {
     }
 
     /// Create an invalid result.
+    #[must_use]
     pub fn invalid() -> Self {
         Self {
             status: PathStatus::Invalid,
@@ -78,6 +82,7 @@ impl PathResult {
     }
 
     /// Whether a path was found.
+    #[must_use]
     pub fn is_found(&self) -> bool {
         self.status == PathStatus::Found
     }
@@ -127,5 +132,28 @@ mod tests {
         let deserialized: PathResult = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.status, PathStatus::Found);
         assert_eq!(deserialized.waypoints.len(), 2);
+    }
+
+    #[test]
+    fn path_result_multi_segment_length() {
+        // 3-4-5 triangle: (0,0) -> (3,0) -> (3,4)
+        let r = PathResult::found(vec![[0.0, 0.0], [3.0, 0.0], [3.0, 4.0]]);
+        // Length should be 3 + 4 = 7
+        assert!((r.length - 7.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn path_result_empty_waypoints() {
+        let r = PathResult::found(vec![]);
+        assert!(r.is_found());
+        assert!((r.length - 0.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn path_status_serde_roundtrip() {
+        let status = PathStatus::Pending;
+        let json = serde_json::to_string(&status).unwrap();
+        let deserialized: PathStatus = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, status);
     }
 }

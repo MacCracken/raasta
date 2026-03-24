@@ -1,7 +1,7 @@
 //! NavMesh — polygon-based navigation mesh.
 
-use std::collections::BinaryHeap;
 use std::cmp::Ordering;
+use std::collections::BinaryHeap;
 
 use serde::{Deserialize, Serialize};
 
@@ -21,18 +21,21 @@ pub struct NavPoly {
 
 impl NavPoly {
     /// Compute the centroid of this polygon.
+    #[must_use]
     pub fn centroid(&self) -> [f32; 2] {
         if self.vertices.is_empty() {
             return [0.0, 0.0];
         }
         let n = self.vertices.len() as f32;
-        let (sx, sy) = self.vertices.iter().fold((0.0f32, 0.0f32), |(ax, ay), v| {
-            (ax + v[0], ay + v[1])
-        });
+        let (sx, sy) = self
+            .vertices
+            .iter()
+            .fold((0.0f32, 0.0f32), |(ax, ay), v| (ax + v[0], ay + v[1]));
         [sx / n, sy / n]
     }
 
     /// Check if a point is inside this convex polygon (2D, XY plane).
+    #[must_use]
     pub fn contains_point(&self, point: [f32; 2]) -> bool {
         let n = self.vertices.len();
         if n < 3 {
@@ -64,6 +67,7 @@ pub struct NavMesh {
 }
 
 impl NavMesh {
+    #[must_use]
     pub fn new() -> Self {
         Self { polys: Vec::new() }
     }
@@ -74,16 +78,19 @@ impl NavMesh {
     }
 
     /// Get all polygons.
+    #[must_use]
     pub fn polys(&self) -> &[NavPoly] {
         &self.polys
     }
 
     /// Get a polygon by its ID.
+    #[must_use]
     pub fn get_poly(&self, id: NavPolyId) -> Option<&NavPoly> {
         self.polys.iter().find(|p| p.id == id)
     }
 
     /// Find which polygon contains the given point.
+    #[must_use]
     pub fn find_poly_at(&self, point: [f32; 2]) -> Option<NavPolyId> {
         self.polys
             .iter()
@@ -94,6 +101,7 @@ impl NavMesh {
     /// Find a path between two points on the navmesh.
     ///
     /// Returns a sequence of polygon IDs from start to goal.
+    #[must_use]
     pub fn find_path(&self, start: [f32; 2], goal: [f32; 2]) -> Option<Vec<NavPolyId>> {
         let start_id = self.find_poly_at(start)?;
         let goal_id = self.find_poly_at(goal)?;
@@ -149,6 +157,7 @@ impl NavMesh {
     }
 
     /// Number of polygons in the mesh.
+    #[must_use]
     pub fn poly_count(&self) -> usize {
         self.polys.len()
     }
@@ -333,5 +342,58 @@ mod tests {
         let json = serde_json::to_string(&mesh).unwrap();
         let deserialized: NavMesh = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.poly_count(), 2);
+    }
+
+    #[test]
+    fn degenerate_poly_contains_point() {
+        // A polygon with < 3 vertices should never contain any point
+        let line = NavPoly {
+            id: NavPolyId(0),
+            vertices: vec![[0.0, 0.0], [1.0, 1.0]],
+            neighbors: vec![],
+        };
+        assert!(!line.contains_point([0.5, 0.5]));
+
+        let point = NavPoly {
+            id: NavPolyId(1),
+            vertices: vec![[0.0, 0.0]],
+            neighbors: vec![],
+        };
+        assert!(!point.contains_point([0.0, 0.0]));
+    }
+
+    #[test]
+    fn empty_mesh() {
+        let mesh = NavMesh::new();
+        assert_eq!(mesh.poly_count(), 0);
+        assert!(mesh.find_poly_at([0.0, 0.0]).is_none());
+        assert!(mesh.find_path([0.0, 0.0], [1.0, 1.0]).is_none());
+    }
+
+    #[test]
+    fn disconnected_polys() {
+        let mut mesh = NavMesh::new();
+        mesh.add_poly(NavPoly {
+            id: NavPolyId(0),
+            vertices: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+            neighbors: vec![], // no connections
+        });
+        mesh.add_poly(NavPoly {
+            id: NavPolyId(1),
+            vertices: vec![[10.0, 10.0], [11.0, 10.0], [11.0, 11.0], [10.0, 11.0]],
+            neighbors: vec![], // no connections
+        });
+        // Both exist but no path between them
+        assert!(mesh.find_poly_at([0.5, 0.5]).is_some());
+        assert!(mesh.find_poly_at([10.5, 10.5]).is_some());
+        assert!(mesh.find_path([0.5, 0.5], [10.5, 10.5]).is_none());
+    }
+
+    #[test]
+    fn navpoly_id_serde_roundtrip() {
+        let id = NavPolyId(42);
+        let json = serde_json::to_string(&id).unwrap();
+        let deserialized: NavPolyId = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, id);
     }
 }
