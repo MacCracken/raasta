@@ -27,6 +27,8 @@
 //! assert!(path.is_some());
 //! ```
 
+mod agent;
+mod follow;
 mod grid;
 mod mesh;
 mod path;
@@ -39,8 +41,10 @@ pub mod logging;
 // Re-export hisab math types used in our public API
 pub use hisab::Vec2;
 
+pub use agent::Agent;
+pub use follow::PathFollower;
 pub use grid::{GridPos, NavGrid};
 pub use mesh::{NavMesh, NavPoly, NavPolyId};
 pub use path::{PathRequest, PathResult, PathStatus};
 pub use smooth::funnel_smooth;
-pub use steer::{SteerBehavior, SteerOutput, compute_steer};
+pub use steer::{Obstacle, SteerBehavior, SteerOutput, avoid_obstacles, compute_steer};
