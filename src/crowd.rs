@@ -16,6 +16,8 @@ pub struct CrowdSimulation {
     density_cell_size: f32,
     /// Maximum comfortable agents per density cell.
     max_density: f32,
+    /// Persistent density map — reused each step to avoid per-frame allocation.
+    density_cache: std::collections::HashMap<(i32, i32), f32>,
 }
 
 impl CrowdSimulation {
@@ -30,6 +32,7 @@ impl CrowdSimulation {
             rvo: RvoSimulation::new(time_horizon),
             density_cell_size,
             max_density,
+            density_cache: std::collections::HashMap::new(),
         }
     }
 
@@ -70,13 +73,13 @@ impl CrowdSimulation {
             return;
         }
 
-        // Build density map
-        let density = self.compute_density();
+        // Rebuild density map in-place (reuse allocation)
+        self.rebuild_density();
 
         // Damp preferred velocities based on local density
         for i in 0..n {
             let cell = self.density_cell(self.rvo.agent(i).position);
-            let local_density = density.get(&cell).copied().unwrap_or(0.0);
+            let local_density = self.density_cache.get(&cell).copied().unwrap_or(0.0);
             let damping = if local_density > self.max_density {
                 self.max_density / local_density
             } else {
@@ -90,11 +93,13 @@ impl CrowdSimulation {
     }
 
     /// Compute the density at a specific world position.
+    ///
+    /// Uses the cached density from the last `step()` call. Call `step()`
+    /// first to ensure up-to-date values.
     #[must_use]
     pub fn density_at(&self, position: Vec2) -> f32 {
         let cell = self.density_cell(position);
-        let density = self.compute_density();
-        density.get(&cell).copied().unwrap_or(0.0)
+        self.density_cache.get(&cell).copied().unwrap_or(0.0)
     }
 
     fn density_cell(&self, position: Vec2) -> (i32, i32) {
@@ -104,13 +109,18 @@ impl CrowdSimulation {
         )
     }
 
-    fn compute_density(&self) -> std::collections::HashMap<(i32, i32), f32> {
-        let mut density = std::collections::HashMap::new();
+    /// Clear and refill the density cache without allocating a new HashMap.
+    fn rebuild_density(&mut self) {
+        // Clear values but keep allocated buckets
+        for v in self.density_cache.values_mut() {
+            *v = 0.0;
+        }
         for i in 0..self.agent_count() {
             let cell = self.density_cell(self.rvo.agent(i).position);
-            *density.entry(cell).or_insert(0.0) += 1.0;
+            *self.density_cache.entry(cell).or_insert(0.0) += 1.0;
         }
-        density
+        // Remove cells that are now zero (agents moved away)
+        self.density_cache.retain(|_, v| *v > 0.0);
     }
 }
 
@@ -146,12 +156,12 @@ mod tests {
             sim.set_preferred_velocity(idx, Vec2::new(5.0, 0.0));
         }
 
+        // Step to populate density cache and apply damping
+        sim.step(0.1);
+
         // Density at origin should be > max_density
         let d = sim.density_at(Vec2::ZERO);
         assert!(d > 2.0);
-
-        // Step should not panic with high density
-        sim.step(0.1);
     }
 
     #[test]

@@ -38,13 +38,16 @@ impl GridPos {
 }
 
 /// A 2D navigation grid with walkability and movement costs.
+///
+/// Walkability is stored as a bitset (1 bit per cell) for 8x memory
+/// reduction compared to `Vec<bool>`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NavGrid {
     width: usize,
     height: usize,
     cell_size: f32,
-    /// true = walkable, false = blocked
-    walkable: Vec<bool>,
+    /// Bit-packed walkability: 1 = walkable, 0 = blocked. Each u64 stores 64 cells.
+    walkable: Vec<u64>,
     /// Per-cell movement cost multiplier (1.0 = normal).
     costs: Vec<f32>,
     /// Whether diagonal movement is allowed.
@@ -60,11 +63,12 @@ impl NavGrid {
     #[must_use]
     pub fn new(width: usize, height: usize, cell_size: f32) -> Self {
         let len = width.checked_mul(height).expect("grid dimensions overflow");
+        let bitset_len = len.div_ceil(64);
         Self {
             width,
             height,
             cell_size,
-            walkable: vec![true; len],
+            walkable: vec![u64::MAX; bitset_len], // all bits set = all walkable
             costs: vec![1.0; len],
             allow_diagonal: true,
         }
@@ -88,15 +92,22 @@ impl NavGrid {
     /// Set whether a cell is walkable.
     pub fn set_walkable(&mut self, x: i32, y: i32, walkable: bool) {
         if let Some(idx) = self.index(x, y) {
-            self.walkable[idx] = walkable;
+            let word = idx / 64;
+            let bit = idx % 64;
+            if walkable {
+                self.walkable[word] |= 1u64 << bit;
+            } else {
+                self.walkable[word] &= !(1u64 << bit);
+            }
         }
     }
 
     /// Check if a cell is walkable.
+    #[inline]
     #[must_use]
     pub fn is_walkable(&self, x: i32, y: i32) -> bool {
         self.index(x, y)
-            .map(|idx| self.walkable[idx])
+            .map(|idx| (self.walkable[idx / 64] >> (idx % 64)) & 1 == 1)
             .unwrap_or(false)
     }
 
@@ -205,7 +216,7 @@ impl NavGrid {
 
     /// Reset all cells to walkable with cost 1.0.
     pub fn clear(&mut self) {
-        self.walkable.fill(true);
+        self.walkable.fill(u64::MAX);
         self.costs.fill(1.0);
     }
 

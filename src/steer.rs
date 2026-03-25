@@ -98,6 +98,135 @@ pub fn compute_steer(behavior: &SteerBehavior, position: Vec2, max_speed: f32) -
     }
 }
 
+/// Compute pursuit steering — intercept a moving target by predicting its future position.
+///
+/// `target_pos` and `target_vel` are the target's current position and velocity.
+/// `prediction_factor` scales how far ahead to predict (typically 1.0).
+#[inline]
+#[must_use]
+pub fn pursuit(position: Vec2, target_pos: Vec2, target_vel: Vec2, max_speed: f32) -> SteerOutput {
+    let to_target = target_pos - position;
+    let dist = to_target.length();
+    if dist < f32::EPSILON {
+        return SteerOutput::default();
+    }
+    // Predict future position based on distance (further = more prediction)
+    let prediction_time = dist / max_speed;
+    let predicted = target_pos + target_vel * prediction_time;
+    compute_steer(
+        &SteerBehavior::Seek { target: predicted },
+        position,
+        max_speed,
+    )
+}
+
+/// Compute evasion steering — flee from a moving target's predicted future position.
+#[inline]
+#[must_use]
+pub fn evade(position: Vec2, target_pos: Vec2, target_vel: Vec2, max_speed: f32) -> SteerOutput {
+    let to_target = target_pos - position;
+    let dist = to_target.length();
+    if dist < f32::EPSILON {
+        return SteerOutput::default();
+    }
+    let prediction_time = dist / max_speed;
+    let predicted = target_pos + target_vel * prediction_time;
+    compute_steer(
+        &SteerBehavior::Flee { target: predicted },
+        position,
+        max_speed,
+    )
+}
+
+/// Compute wander steering — natural-looking random movement.
+///
+/// Projects a circle of `wander_radius` at `wander_distance` ahead of the
+/// agent, then displaces the target by `wander_angle` radians on that circle.
+///
+/// Call with a varying `wander_angle` each tick (e.g., previous angle ± small random delta)
+/// for smooth wandering.
+#[inline]
+#[must_use]
+pub fn wander(
+    position: Vec2,
+    velocity: Vec2,
+    max_speed: f32,
+    wander_distance: f32,
+    wander_radius: f32,
+    wander_angle: f32,
+) -> SteerOutput {
+    let speed = velocity.length();
+    let forward = if speed > f32::EPSILON {
+        velocity / speed
+    } else {
+        Vec2::new(1.0, 0.0)
+    };
+
+    let circle_center = position + forward * wander_distance;
+    let displacement = Vec2::new(wander_angle.cos(), wander_angle.sin()) * wander_radius;
+    let target = circle_center + displacement;
+
+    compute_steer(&SteerBehavior::Seek { target }, position, max_speed)
+}
+
+/// Compute separation steering — steer away from nearby neighbors.
+///
+/// Returns a force that pushes the agent away from neighbors within `radius`.
+/// Closer neighbors produce stronger repulsion.
+#[must_use]
+pub fn separation(position: Vec2, neighbors: &[Vec2], radius: f32, max_force: f32) -> SteerOutput {
+    let mut force = Vec2::ZERO;
+    let mut count = 0;
+
+    for &neighbor in neighbors {
+        let diff = position - neighbor;
+        let dist = diff.length();
+        if dist > f32::EPSILON && dist < radius {
+            // Weight inversely by distance
+            force += diff / (dist * dist);
+            count += 1;
+        }
+    }
+
+    if count > 0 {
+        force /= count as f32;
+        let len = force.length();
+        if len > f32::EPSILON {
+            force = force / len * max_force;
+        }
+    }
+
+    SteerOutput::from_vec2(force)
+}
+
+/// Compute alignment steering — steer toward the average heading of neighbors.
+#[must_use]
+pub fn alignment(velocity: Vec2, neighbor_velocities: &[Vec2], max_force: f32) -> SteerOutput {
+    if neighbor_velocities.is_empty() {
+        return SteerOutput::default();
+    }
+
+    let avg: Vec2 =
+        neighbor_velocities.iter().copied().sum::<Vec2>() / neighbor_velocities.len() as f32;
+    let desired = avg - velocity;
+    let len = desired.length();
+    if len < f32::EPSILON {
+        return SteerOutput::default();
+    }
+    SteerOutput::from_vec2(desired / len * max_force)
+}
+
+/// Compute cohesion steering — steer toward the center of mass of neighbors.
+#[must_use]
+pub fn cohesion(position: Vec2, neighbors: &[Vec2], max_speed: f32) -> SteerOutput {
+    if neighbors.is_empty() {
+        return SteerOutput::default();
+    }
+
+    let center: Vec2 = neighbors.iter().copied().sum::<Vec2>() / neighbors.len() as f32;
+    compute_steer(&SteerBehavior::Seek { target: center }, position, max_speed)
+}
+
 /// Compute an avoidance steering force away from nearby obstacles.
 ///
 /// Casts a ray from `position` along `velocity` up to `look_ahead` distance.
@@ -426,5 +555,111 @@ mod tests {
         let json = serde_json::to_string(&obs).unwrap();
         let deserialized: Obstacle = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, obs);
+    }
+
+    // --- Pursuit / Evade / Wander / Flocking tests ---
+
+    #[test]
+    fn pursuit_intercepts() {
+        // Target moving right, agent behind and below
+        let out = pursuit(
+            Vec2::new(0.0, -5.0),
+            Vec2::new(5.0, 0.0),
+            Vec2::new(1.0, 0.0),
+            5.0,
+        );
+        // Should aim ahead of target (positive x component)
+        assert!(out.velocity.x > 0.0);
+        assert!(out.speed() > 0.0);
+    }
+
+    #[test]
+    fn evade_flees_predicted() {
+        let out = evade(
+            Vec2::ZERO,
+            Vec2::new(5.0, 0.0),
+            Vec2::new(-1.0, 0.0), // target approaching
+            5.0,
+        );
+        // Should flee from predicted position (which is closer)
+        assert!(out.velocity.x < 0.0);
+    }
+
+    #[test]
+    fn wander_produces_movement() {
+        let out = wander(
+            Vec2::ZERO,
+            Vec2::new(1.0, 0.0),
+            5.0,
+            2.0, // distance
+            1.0, // radius
+            0.5, // angle
+        );
+        assert!(out.speed() > 0.0);
+    }
+
+    #[test]
+    fn wander_stationary_agent() {
+        let out = wander(Vec2::ZERO, Vec2::ZERO, 5.0, 2.0, 1.0, 0.0);
+        // Uses default forward direction, should still produce movement
+        assert!(out.speed() > 0.0);
+    }
+
+    #[test]
+    fn separation_pushes_apart() {
+        let neighbors = vec![Vec2::new(1.0, 0.0), Vec2::new(-1.0, 0.0)];
+        let out = separation(Vec2::ZERO, &neighbors, 5.0, 10.0);
+        // Equal neighbors on both sides — should roughly cancel, low force
+        assert!(out.speed() < 1.0);
+    }
+
+    #[test]
+    fn separation_one_neighbor() {
+        let neighbors = vec![Vec2::new(1.0, 0.0)];
+        let out = separation(Vec2::ZERO, &neighbors, 5.0, 10.0);
+        // Should push away from neighbor (negative x)
+        assert!(out.velocity.x < 0.0);
+    }
+
+    #[test]
+    fn separation_no_neighbors() {
+        let out = separation(Vec2::ZERO, &[], 5.0, 10.0);
+        assert!(out.speed() < f32::EPSILON);
+    }
+
+    #[test]
+    fn separation_out_of_range() {
+        let neighbors = vec![Vec2::new(100.0, 0.0)];
+        let out = separation(Vec2::ZERO, &neighbors, 5.0, 10.0);
+        assert!(out.speed() < f32::EPSILON);
+    }
+
+    #[test]
+    fn alignment_matches_heading() {
+        let neighbor_vels = vec![Vec2::new(3.0, 0.0), Vec2::new(3.0, 0.0)];
+        let out = alignment(Vec2::new(1.0, 0.0), &neighbor_vels, 5.0);
+        // Should steer to match neighbors (increase x velocity)
+        assert!(out.velocity.x > 0.0);
+    }
+
+    #[test]
+    fn alignment_no_neighbors() {
+        let out = alignment(Vec2::new(1.0, 0.0), &[], 5.0);
+        assert!(out.speed() < f32::EPSILON);
+    }
+
+    #[test]
+    fn cohesion_toward_center() {
+        let neighbors = vec![Vec2::new(10.0, 0.0), Vec2::new(10.0, 10.0)];
+        let out = cohesion(Vec2::ZERO, &neighbors, 5.0);
+        // Should steer toward center of mass (positive x and y)
+        assert!(out.velocity.x > 0.0);
+        assert!(out.velocity.y > 0.0);
+    }
+
+    #[test]
+    fn cohesion_no_neighbors() {
+        let out = cohesion(Vec2::ZERO, &[], 5.0);
+        assert!(out.speed() < f32::EPSILON);
     }
 }

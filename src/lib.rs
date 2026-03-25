@@ -59,6 +59,9 @@ pub use mesh3d::{NavMesh3D, NavPoly3D};
 pub use path::{PathRequest, PathResult, PathStatus};
 pub use rvo::{HalfPlane, RvoAgent, RvoSimulation, compute_orca_half_plane, solve_velocity};
 pub use smooth::funnel_smooth;
-pub use steer::{Obstacle, SteerBehavior, SteerOutput, avoid_obstacles, compute_steer};
+pub use steer::{
+    Obstacle, SteerBehavior, SteerOutput, alignment, avoid_obstacles, cohesion, compute_steer,
+    evade, pursuit, separation, wander,
+};
 pub use steer3d::{SteerBehavior3D, SteerOutput3D, compute_steer_3d};
 pub use triangulate::{merge_convex, triangulate, triangulate_points};

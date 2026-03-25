@@ -8,7 +8,7 @@
 - **License**: GPL-3.0-only
 - **MSRV**: 1.89
 - **Version**: SemVer 0.1.0
-- **Tests**: 59 (52 unit + 6 integration + 1 doc)
+- **Tests**: 242 (230 unit + 6 integration + 1 doc + 5 should_panic)
 
 ## Consumers
 
