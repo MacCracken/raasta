@@ -27,7 +27,7 @@ pub enum SteerBehavior {
 }
 
 /// Output of a steering computation.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
 pub struct SteerOutput {
     /// Desired velocity direction and magnitude.
     pub velocity: Vec2,
@@ -661,5 +661,13 @@ mod tests {
     fn cohesion_no_neighbors() {
         let out = cohesion(Vec2::ZERO, &[], 5.0);
         assert!(out.speed() < f32::EPSILON);
+    }
+
+    #[test]
+    fn steer_output_serde_roundtrip() {
+        let out = SteerOutput::new(3.0, 4.0);
+        let json = serde_json::to_string(&out).unwrap();
+        let deserialized: SteerOutput = serde_json::from_str(&json).unwrap();
+        assert!((deserialized.speed() - 5.0).abs() < 0.01);
     }
 }

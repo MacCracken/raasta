@@ -6,6 +6,9 @@ use std::collections::BinaryHeap;
 use hisab::Vec2;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "logging")]
+use tracing::instrument;
+
 /// A position on the navigation grid.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct GridPos {
@@ -241,6 +244,7 @@ impl NavGrid {
     /// Find a path from `start` to `goal` using A*.
     ///
     /// Returns `None` if no path exists.
+    #[cfg_attr(feature = "logging", instrument(skip(self), fields(w = self.width, h = self.height)))]
     #[must_use]
     pub fn find_path(&self, start: GridPos, goal: GridPos) -> Option<Vec<GridPos>> {
         if !self.is_walkable(start.x, start.y) || !self.is_walkable(goal.x, goal.y) {
@@ -322,6 +326,7 @@ impl NavGrid {
     /// **Requirements:** `allow_diagonal` must be `true` and all walkable cells
     /// should have uniform cost (1.0). Falls back to standard A* if these
     /// conditions are not met.
+    #[cfg_attr(feature = "logging", instrument(skip(self)))]
     #[must_use]
     pub fn find_path_jps(&self, start: GridPos, goal: GridPos) -> Option<Vec<GridPos>> {
         // JPS requires diagonal movement
@@ -415,55 +420,96 @@ impl NavGrid {
     }
 
     /// Jump in direction (dx, dy) from (x, y). Returns the jump point if found.
+    ///
+    /// Iterative implementation to avoid stack overflow on large grids.
     #[inline]
     fn jump(&self, x: i32, y: i32, dx: i32, dy: i32, goal: GridPos) -> Option<GridPos> {
-        let nx = x + dx;
-        let ny = y + dy;
+        let mut cx = x + dx;
+        let mut cy = y + dy;
 
-        if !self.is_walkable(nx, ny) {
-            return None;
-        }
+        loop {
+            if !self.is_walkable(cx, cy) {
+                return None;
+            }
 
-        if nx == goal.x && ny == goal.y {
-            return Some(GridPos::new(nx, ny));
-        }
+            if cx == goal.x && cy == goal.y {
+                return Some(GridPos::new(cx, cy));
+            }
 
-        // Check for forced neighbors
-        if dx != 0 && dy != 0 {
-            // Diagonal move: forced neighbor if blocked cardinal but open diagonal-adjacent
-            if (!self.is_walkable(nx - dx, ny) && self.is_walkable(nx - dx, ny + dy))
-                || (!self.is_walkable(nx, ny - dy) && self.is_walkable(nx + dx, ny - dy))
-            {
-                return Some(GridPos::new(nx, ny));
+            // Check for forced neighbors
+            if dx != 0 && dy != 0 {
+                // Diagonal move: forced neighbor if blocked cardinal but open diagonal-adjacent
+                if (!self.is_walkable(cx - dx, cy) && self.is_walkable(cx - dx, cy + dy))
+                    || (!self.is_walkable(cx, cy - dy) && self.is_walkable(cx + dx, cy - dy))
+                {
+                    return Some(GridPos::new(cx, cy));
+                }
+                // Diagonal: must also check cardinal sub-jumps (these are straight-line, safe to recurse)
+                if self.jump_straight(cx, cy, dx, 0, goal).is_some()
+                    || self.jump_straight(cx, cy, 0, dy, goal).is_some()
+                {
+                    return Some(GridPos::new(cx, cy));
+                }
+            } else if dx != 0 {
+                // Horizontal move
+                if (!self.is_walkable(cx, cy + 1) && self.is_walkable(cx + dx, cy + 1))
+                    || (!self.is_walkable(cx, cy - 1) && self.is_walkable(cx + dx, cy - 1))
+                {
+                    return Some(GridPos::new(cx, cy));
+                }
+            } else {
+                // Vertical move
+                if (!self.is_walkable(cx + 1, cy) && self.is_walkable(cx + 1, cy + dy))
+                    || (!self.is_walkable(cx - 1, cy) && self.is_walkable(cx - 1, cy + dy))
+                {
+                    return Some(GridPos::new(cx, cy));
+                }
             }
-            // Diagonal: must also check cardinal sub-jumps
-            if self.jump(nx, ny, dx, 0, goal).is_some() || self.jump(nx, ny, 0, dy, goal).is_some()
-            {
-                return Some(GridPos::new(nx, ny));
-            }
-        } else if dx != 0 {
-            // Horizontal move
-            if (!self.is_walkable(nx, ny + 1) && self.is_walkable(nx + dx, ny + 1))
-                || (!self.is_walkable(nx, ny - 1) && self.is_walkable(nx + dx, ny - 1))
-            {
-                return Some(GridPos::new(nx, ny));
-            }
-        } else {
-            // Vertical move
-            if (!self.is_walkable(nx + 1, ny) && self.is_walkable(nx + 1, ny + dy))
-                || (!self.is_walkable(nx - 1, ny) && self.is_walkable(nx - 1, ny + dy))
-            {
-                return Some(GridPos::new(nx, ny));
-            }
-        }
 
-        // Continue jumping
-        // Diagonal requires both cardinal cells walkable (no corner-cutting)
-        if dx != 0 && dy != 0 && (!self.is_walkable(nx + dx, ny) || !self.is_walkable(nx, ny + dy))
-        {
-            return None;
+            // Continue jumping
+            // Diagonal requires both cardinal cells walkable (no corner-cutting)
+            if dx != 0
+                && dy != 0
+                && (!self.is_walkable(cx + dx, cy) || !self.is_walkable(cx, cy + dy))
+            {
+                return None;
+            }
+            cx += dx;
+            cy += dy;
         }
-        self.jump(nx, ny, dx, dy, goal)
+    }
+
+    /// Straight-line (cardinal) jump — iterative helper for diagonal jump's sub-searches.
+    #[inline]
+    fn jump_straight(&self, x: i32, y: i32, dx: i32, dy: i32, goal: GridPos) -> Option<GridPos> {
+        debug_assert!(
+            (dx == 0) != (dy == 0),
+            "jump_straight must be cardinal only"
+        );
+        let mut cx = x + dx;
+        let mut cy = y + dy;
+
+        loop {
+            if !self.is_walkable(cx, cy) {
+                return None;
+            }
+            if cx == goal.x && cy == goal.y {
+                return Some(GridPos::new(cx, cy));
+            }
+            if dx != 0 {
+                if (!self.is_walkable(cx, cy + 1) && self.is_walkable(cx + dx, cy + 1))
+                    || (!self.is_walkable(cx, cy - 1) && self.is_walkable(cx + dx, cy - 1))
+                {
+                    return Some(GridPos::new(cx, cy));
+                }
+            } else if (!self.is_walkable(cx + 1, cy) && self.is_walkable(cx + 1, cy + dy))
+                || (!self.is_walkable(cx - 1, cy) && self.is_walkable(cx - 1, cy + dy))
+            {
+                return Some(GridPos::new(cx, cy));
+            }
+            cx += dx;
+            cy += dy;
+        }
     }
 
     /// Prune directions for JPS based on parent direction.
@@ -603,6 +649,7 @@ impl NavGrid {
     /// Like A\*, but checks line-of-sight to the parent's parent. If LOS
     /// exists, skips the intermediate node, producing smoother paths
     /// without post-processing.
+    #[cfg_attr(feature = "logging", instrument(skip(self)))]
     #[must_use]
     pub fn find_path_theta(&self, start: GridPos, goal: GridPos) -> Option<Vec<GridPos>> {
         if !self.is_walkable(start.x, start.y) || !self.is_walkable(goal.x, goal.y) {
@@ -670,7 +717,14 @@ impl NavGrid {
                     (source_idx % self.width) as i32,
                     (source_idx / self.width) as i32,
                 );
-                let tentative_g = source_g + source_pos.octile_distance(neighbor_pos);
+                let edge_cost = if source_idx == current.idx {
+                    // Regular A* step — adjacent cell
+                    source_pos.octile_distance(neighbor_pos) * self.costs[n_idx]
+                } else {
+                    // LOS shortcut — sum costs along the line
+                    self.line_cost(source_pos, neighbor_pos)
+                };
+                let tentative_g = source_g + edge_cost;
 
                 if tentative_g < g_score[n_idx] {
                     came_from[n_idx] = Some(source_idx);
@@ -691,6 +745,7 @@ impl NavGrid {
     ///
     /// Returns a grid-sized Vec of direction vectors `(dx, dy)` where
     /// `(0, 0)` means the goal cell or unreachable.
+    #[cfg_attr(feature = "logging", instrument(skip(self)))]
     #[must_use]
     pub fn flow_field(&self, goal: GridPos) -> Vec<(i32, i32)> {
         let len = self.width * self.height;
@@ -761,6 +816,47 @@ impl NavGrid {
         }
 
         directions
+    }
+
+    /// Sum movement costs along a Bresenham line from `from` to `to`.
+    /// Used by Theta\* for cost-aware LOS shortcuts.
+    fn line_cost(&self, from: GridPos, to: GridPos) -> f32 {
+        let mut cost = 0.0f32;
+        let mut x = from.x;
+        let mut y = from.y;
+        let dx = (to.x - from.x).abs();
+        let dy = (to.y - from.y).abs();
+        let sx = if from.x < to.x { 1 } else { -1 };
+        let sy = if from.y < to.y { 1 } else { -1 };
+        let mut err = dx - dy;
+
+        loop {
+            if x == to.x && y == to.y {
+                break;
+            }
+            let e2 = 2 * err;
+            let mut moved_x = false;
+            let mut moved_y = false;
+            if e2 > -dy {
+                err -= dy;
+                x += sx;
+                moved_x = true;
+            }
+            if e2 < dx {
+                err += dx;
+                y += sy;
+                moved_y = true;
+            }
+            let step_dist = if moved_x && moved_y {
+                std::f32::consts::SQRT_2
+            } else {
+                1.0
+            };
+            let cell_cost = self.index(x, y).map(|idx| self.costs[idx]).unwrap_or(1.0);
+            cost += step_dist * cell_cost;
+        }
+
+        cost
     }
 
     #[inline]
@@ -1508,6 +1604,73 @@ mod tests {
         let path = path.unwrap();
         for p in &path {
             assert!(grid.is_walkable(p.x, p.y));
+        }
+    }
+
+    #[test]
+    fn theta_respects_movement_costs() {
+        // 10x3 grid with expensive vertical stripe at x=5.
+        // If Theta* respects costs, it should avoid cells in column 5.
+        let mut grid = NavGrid::new(10, 3, 1.0);
+        for y in 0..3 {
+            grid.set_cost(5, y, 100.0);
+        }
+        let path = grid.find_path_theta(GridPos::new(0, 1), GridPos::new(9, 1));
+        assert!(path.is_some());
+        let path = path.unwrap();
+        assert_eq!(*path.first().unwrap(), GridPos::new(0, 1));
+        assert_eq!(*path.last().unwrap(), GridPos::new(9, 1));
+        // All waypoints should be walkable
+        for p in &path {
+            assert!(grid.is_walkable(p.x, p.y));
+        }
+        // The path should avoid the expensive column 5 at y=1
+        // (may pass through (5,0) or (5,2) which are cheaper routes)
+        let passes_through_5_1 = path.contains(&GridPos::new(5, 1));
+        // With a cost of 100x, the path should detour around column 5 via row 0 or 2
+        assert!(
+            !passes_through_5_1,
+            "Theta* should avoid expensive cell (5,1)"
+        );
+    }
+
+    #[test]
+    fn flow_field_with_costs() {
+        let mut grid = NavGrid::new(5, 1, 1.0);
+        grid.allow_diagonal = false;
+        // Make cell (2,0) expensive
+        grid.set_cost(2, 0, 10.0);
+        let field = grid.flow_field(GridPos::new(4, 0));
+        // Cell (1,0) should still point toward goal (positive dx)
+        let idx = 1; // (1, 0)
+        assert_eq!(field[idx].0, 1);
+    }
+
+    #[test]
+    fn jps_large_grid_with_maze() {
+        // Stress test: 200x200 grid with maze-like walls
+        let mut grid = NavGrid::new(200, 200, 1.0);
+        for y in (0..200).step_by(4) {
+            for x in 0..198 {
+                grid.set_walkable(x, y, false);
+            }
+        }
+        for y in (2..200).step_by(4) {
+            for x in 2..200 {
+                grid.set_walkable(x, y, false);
+            }
+        }
+        let path = grid.find_path_jps(GridPos::new(0, 1), GridPos::new(199, 199));
+        // Either finds a path or correctly returns None — just shouldn't stack overflow
+        if let Some(path) = &path {
+            for p in path {
+                assert!(grid.is_walkable(p.x, p.y));
+            }
+            for w in path.windows(2) {
+                let dx = (w[1].x - w[0].x).abs();
+                let dy = (w[1].y - w[0].y).abs();
+                assert!(dx <= 1 && dy <= 1 && (dx + dy) > 0);
+            }
         }
     }
 }

@@ -4,6 +4,31 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Fixed
+
+- **mesh** — `NavMesh::get_poly()` and `NavMesh3D::get_poly()` O(n) linear scan → O(1) index lookup
+- **mesh** — `NavMesh` and `NavMesh3D` A* pathfinding: `HashMap`/`HashSet` → `Vec`-indexed arrays (eliminates hashing overhead)
+- **grid** — JPS `jump()` converted from recursive to iterative (prevents stack overflow on large grids)
+- **grid** — Theta\* now respects per-cell movement costs via line-cost accumulation along LOS shortcuts
+- **triangulate** — `point_in_triangle` guarded against division by zero on degenerate triangles
+
+### Added
+
+- **tracing** — `#[instrument]` spans on all public pathfinding, baking, simulation, and query operations (gated behind `logging` feature)
+- **serde** — `Serialize`/`Deserialize` on `SteerOutput`, `SteerOutput3D`, `HalfPlane`, `AbstractNodeId`, `Entrance`, `DebugLine`, `DebugPoint`, `DebugDraw`
+- **tests** — 8 new tests: Theta\* cost awareness, flow field with costs, JPS large-grid maze stress test, RVO 20-agent simulation, serde roundtrips for new types
+- **benchmarks** — 9 new benchmarks: Theta\* (open + obstacles), RVO step, crowd step, NavMesh bake (square + L-shape), triangulation, funnel smoothing
+
+### Performance
+
+- **navmesh_path_10_polys**: 1.67 µs → 381 ns (−77%)
+- **navmesh_path_100_polys**: 21.1 µs → 2.52 µs (−88%)
+- **navmesh_path_500_polys**: 193 µs → 11.5 µs (−94%)
+- **navmesh_path_1000_polys**: 636 µs → 22.6 µs (−96%)
+- **jps_50x50_obstacles**: 1.03 µs → 972 ns (−6%, iterative jump)
+
 ## [0.24.3] — 2026-03-24
 
 ### Added

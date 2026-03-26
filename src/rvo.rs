@@ -6,8 +6,11 @@
 use hisab::Vec2;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "logging")]
+use tracing::instrument;
+
 /// A half-plane constraint: all velocities v where `(v - point) · normal ≥ 0`.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct HalfPlane {
     /// A point on the constraint boundary.
     pub point: Vec2,
@@ -291,6 +294,7 @@ impl RvoSimulation {
     ///
     /// Computes ORCA constraints for all agent pairs, solves for safe
     /// velocities, and updates positions.
+    #[cfg_attr(feature = "logging", instrument(skip(self), fields(agents = self.agents.len())))]
     pub fn step(&mut self, dt: f32) {
         let n = self.agents.len();
         let mut new_velocities = vec![Vec2::ZERO; n];
@@ -575,5 +579,48 @@ mod tests {
         // All agents should have moved generally toward their targets
         assert!(sim.agent(agents[0]).position.x > -5.0);
         assert!(sim.agent(agents[1]).position.x < 5.0);
+    }
+
+    #[test]
+    fn simulation_many_agents() {
+        // 20 agents in a circle, all heading to the opposite side
+        let mut sim = RvoSimulation::new(3.0);
+        let n = 20;
+        let radius = 10.0;
+        let mut agents = Vec::new();
+        for i in 0..n {
+            let angle = std::f32::consts::TAU * i as f32 / n as f32;
+            let pos = Vec2::new(angle.cos() * radius, angle.sin() * radius);
+            let goal = -pos; // opposite side
+            let idx = sim.add_agent(RvoAgent::new(pos, 0.5, 2.0));
+            let dir = (goal - pos).normalize();
+            sim.set_preferred_velocity(idx, dir * 2.0);
+            agents.push(idx);
+        }
+
+        for _ in 0..200 {
+            sim.step(0.05);
+        }
+
+        // All agents should have moved — no deadlock
+        for &idx in &agents {
+            let dist_from_origin = sim.agent(idx).position.length();
+            assert!(
+                dist_from_origin < radius + 5.0,
+                "agent {idx} drifted too far: {dist_from_origin}"
+            );
+        }
+    }
+
+    #[test]
+    fn half_plane_serde_roundtrip() {
+        let hp = HalfPlane {
+            point: Vec2::new(1.0, 2.0),
+            normal: Vec2::new(0.0, 1.0),
+        };
+        let json = serde_json::to_string(&hp).unwrap();
+        let deserialized: HalfPlane = serde_json::from_str(&json).unwrap();
+        assert!((deserialized.point - hp.point).length() < f32::EPSILON);
+        assert!((deserialized.normal - hp.normal).length() < f32::EPSILON);
     }
 }

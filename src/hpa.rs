@@ -6,6 +6,9 @@
 
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "logging")]
+use tracing::instrument;
+
 use crate::grid::{GridPos, NavGrid};
 
 /// Identifier for a cluster in the grid hierarchy.
@@ -18,7 +21,7 @@ pub struct ClusterId {
 }
 
 /// An entrance between two adjacent clusters.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Entrance {
     /// Cells on the border — each pair is (cell_in_cluster_a, cell_in_cluster_b).
     pub cells: Vec<(GridPos, GridPos)>,
@@ -40,6 +43,7 @@ impl GridClusters {
     /// Build clusters and identify entrances for the given grid.
     ///
     /// `cluster_size` is the width/height of each cluster in cells (e.g., 8 or 16).
+    #[cfg_attr(feature = "logging", instrument(skip(grid), fields(w = grid.width(), h = grid.height())))]
     #[must_use]
     pub fn build(grid: &NavGrid, cluster_size: u32) -> Self {
         let clusters_wide = (grid.width() as u32).div_ceil(cluster_size);
@@ -201,7 +205,7 @@ impl GridClusters {
 }
 
 /// A node in the abstract graph — represents one side of an entrance.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct AbstractNodeId(pub u32);
 
 /// An edge in the abstract graph.
@@ -231,6 +235,7 @@ pub struct AbstractGraph {
 
 impl AbstractGraph {
     /// Build the abstract graph from grid clusters.
+    #[cfg_attr(feature = "logging", instrument(skip(grid, clusters)))]
     #[must_use]
     pub fn build(grid: &NavGrid, clusters: &GridClusters) -> Self {
         let mut graph = Self {
@@ -338,6 +343,7 @@ impl AbstractGraph {
     /// graph, then refines through intra-cluster A* paths on the base grid.
     ///
     /// Returns `None` if no path exists.
+    #[cfg_attr(feature = "logging", instrument(skip(self, grid, clusters)))]
     #[must_use]
     pub fn find_path(
         &self,

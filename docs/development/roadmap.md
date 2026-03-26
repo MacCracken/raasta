@@ -36,28 +36,39 @@
 - [x] **Navigation queries** — closest point, raycast, nearest walkable
 - [x] **Debug visualization** — geometry output for navmesh, paths, flow fields
 
-## P3 — Future (from gap analysis)
+## P3 — Future (from gap analysis + external research)
 
-### Tier 1 — High Impact
+### Tier 1 — High Impact (production-critical)
+- [ ] Partial path return — when destination unreachable, return path to closest reachable point
+- [ ] Path corridor — sliding window with local replanning on world changes
+- [ ] Off-mesh links — jumps, ladders, teleporters, doors (custom traversal edges)
+- [ ] NavMesh area costs — per-polygon traversal cost with per-agent multipliers
+- [ ] Async / incremental pathfinding — time-sliced A* with per-frame budget
+- [ ] Path request batching + priority queue — cap per-frame pathfinding cost
 - [ ] Spatial hashing for RVO neighbor queries (O(n²) → O(n·k))
 - [ ] Behavior blending / priority system for combining multiple steerings
-- [ ] Proper funnel algorithm on portal edges (SSFA)
-- [ ] NavMesh area costs (per-polygon traversal cost)
-- [ ] Path corridor (sliding window with local replanning)
+- [ ] Proper funnel algorithm on portal edges (SSFA) with agent radius
 
-### Tier 2
-- [ ] Off-mesh links (jumps, ladders, teleporters)
+### Tier 2 — Expected by serious consumers
+- [ ] Tiled navmesh — streaming, localized re-baking for open worlds
+- [ ] Dynamic navmesh rebuild — rebuild only affected tiles on geometry change
+- [ ] NavMesh obstacle carving — subtract shapes from navmesh topology at runtime
+- [ ] Navigation query filters — per-agent include/exclude flags without re-baking
+- [ ] Random point on navmesh — for wander targets, spawn points
+- [ ] Height/elevation queries — ground-snap (x,z) → y
+- [ ] NavMesh serialization — save/load baked navmesh to avoid re-baking
 - [ ] D* Lite (incremental replanning)
 - [ ] Lazy Theta* (deferred LOS checks)
 - [ ] Query object pattern (concurrent pathfinding)
-- [ ] Tiled navmesh (streaming, localized re-baking)
-- [ ] Navigation query filters (per-agent traversal rules)
-- [ ] NavMesh obstacle carving
 
-### Tier 3
+### Tier 3 — Differentiators
+- [ ] Multi-floor / multi-layer navmesh — overlapping layers for bridges, buildings
+- [ ] Formation movement — slots, leader-follow, formation maintenance
+- [ ] Influence maps / cost annotations — danger zones, strategic value overlays
+- [ ] Pre-allocated A* scratch buffers / node pool (zero per-path allocation)
+- [ ] Connected-component IDs — reject unreachable queries instantly
 - [ ] Bidirectional A*
 - [ ] Fringe search
-- [ ] Pre-allocated A* scratch buffers
 - [ ] Goal bounding / differential heuristics
 - [ ] Sliced/incremental pathfinding (spread across frames)
 - [ ] Heightfield-based navmesh baking from 3D geometry

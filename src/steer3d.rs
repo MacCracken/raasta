@@ -16,7 +16,7 @@ pub enum SteerBehavior3D {
 }
 
 /// Output of a 3D steering computation.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
 pub struct SteerOutput3D {
     pub velocity: Vec3,
 }
@@ -184,5 +184,13 @@ mod tests {
     fn steer_output_3d_speed() {
         let out = SteerOutput3D::new(3.0, 4.0, 0.0);
         assert!((out.speed() - 5.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn steer_output_3d_serde_roundtrip() {
+        let out = SteerOutput3D::new(1.0, 2.0, 3.0);
+        let json = serde_json::to_string(&out).unwrap();
+        let deserialized: SteerOutput3D = serde_json::from_str(&json).unwrap();
+        assert!((deserialized.velocity - out.velocity).length() < f32::EPSILON);
     }
 }

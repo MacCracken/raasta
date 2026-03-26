@@ -6,6 +6,9 @@ use std::collections::BinaryHeap;
 use hisab::Vec2;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "logging")]
+use tracing::instrument;
+
 /// Unique identifier for a navigation polygon.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct NavPolyId(pub u32);
@@ -71,6 +74,7 @@ impl NavMesh {
     ///
     /// Triangulates the polygon, merges triangles into convex regions,
     /// and auto-detects neighbor connectivity from shared edges.
+    #[cfg_attr(feature = "logging", instrument(fields(vertices = boundary.len())))]
     #[must_use]
     pub fn bake(boundary: &[Vec2]) -> Self {
         use crate::triangulate::{merge_convex, triangulate};
@@ -143,9 +147,12 @@ impl NavMesh {
     }
 
     /// Get a polygon by its ID.
+    ///
+    /// Assumes poly IDs are contiguous indices `0..poly_count()`.
+    #[inline]
     #[must_use]
     pub fn get_poly(&self, id: NavPolyId) -> Option<&NavPoly> {
-        self.polys.iter().find(|p| p.id == id)
+        self.polys.get(id.0 as usize).filter(|p| p.id == id)
     }
 
     /// Find which polygon contains the given point.
@@ -195,6 +202,7 @@ impl NavMesh {
     /// with a navmesh polygon edge.
     ///
     /// Returns the intersection point, or `None` if the ray doesn't hit any edge.
+    #[cfg_attr(feature = "logging", instrument(skip(self)))]
     #[must_use]
     pub fn raycast(&self, origin: Vec2, direction: Vec2) -> Option<Vec2> {
         let dir_len = direction.length();
@@ -227,6 +235,7 @@ impl NavMesh {
     /// Find a path between two points on the navmesh.
     ///
     /// Returns a sequence of polygon IDs from start to goal.
+    #[cfg_attr(feature = "logging", instrument(skip(self), fields(polys = self.polys.len())))]
     #[must_use]
     pub fn find_path(&self, start: Vec2, goal: Vec2) -> Option<Vec<NavPolyId>> {
         let start_id = self.find_poly_at(start)?;
@@ -236,13 +245,14 @@ impl NavMesh {
             return Some(vec![start_id]);
         }
 
-        // A* over polygon graph
-        let mut g_score = std::collections::HashMap::new();
-        let mut came_from = std::collections::HashMap::new();
-        let mut closed = std::collections::HashSet::new();
+        let n = self.polys.len();
+        let mut g_score = vec![f32::INFINITY; n];
+        let mut came_from: Vec<Option<u32>> = vec![None; n];
+        let mut closed = vec![false; n];
         let mut open = BinaryHeap::new();
 
-        g_score.insert(start_id, 0.0f32);
+        let start_idx = start_id.0 as usize;
+        g_score[start_idx] = 0.0;
         let goal_centroid = self.get_poly(goal_id)?.centroid();
         let start_centroid = self.get_poly(start_id)?.centroid();
         let h = start_centroid.distance(goal_centroid);
@@ -254,19 +264,22 @@ impl NavMesh {
 
         while let Some(current) = open.pop() {
             if current.id == goal_id {
-                return Some(self.reconstruct_path(&came_from, goal_id));
+                return Some(Self::reconstruct_path_vec(&came_from, start_id, goal_id));
             }
 
-            if !closed.insert(current.id) {
+            let ci = current.id.0 as usize;
+            if closed[ci] {
                 continue;
             }
+            closed[ci] = true;
 
-            let current_g = g_score[&current.id];
+            let current_g = g_score[ci];
             let poly = self.get_poly(current.id)?;
             let current_centroid = poly.centroid();
 
             for &neighbor_id in &poly.neighbors {
-                if closed.contains(&neighbor_id) {
+                let ni = neighbor_id.0 as usize;
+                if ni >= n || closed[ni] {
                     continue;
                 }
                 let neighbor = self.get_poly(neighbor_id)?;
@@ -274,10 +287,9 @@ impl NavMesh {
                 let edge_cost = current_centroid.distance(neighbor_centroid);
                 let tentative_g = current_g + edge_cost;
 
-                let prev_g = g_score.get(&neighbor_id).copied().unwrap_or(f32::INFINITY);
-                if tentative_g < prev_g {
-                    came_from.insert(neighbor_id, current.id);
-                    g_score.insert(neighbor_id, tentative_g);
+                if tentative_g < g_score[ni] {
+                    came_from[ni] = Some(current.id.0);
+                    g_score[ni] = tentative_g;
                     let h = neighbor_centroid.distance(goal_centroid);
                     open.push(MeshNode {
                         id: neighbor_id,
@@ -296,17 +308,20 @@ impl NavMesh {
         self.polys.len()
     }
 
-    fn reconstruct_path(
-        &self,
-        came_from: &std::collections::HashMap<NavPolyId, NavPolyId>,
+    fn reconstruct_path_vec(
+        came_from: &[Option<u32>],
+        start_id: NavPolyId,
         goal_id: NavPolyId,
     ) -> Vec<NavPolyId> {
         let mut path = Vec::new();
         let mut current = goal_id;
         loop {
             path.push(current);
-            match came_from.get(&current) {
-                Some(&prev) => current = prev,
+            if current == start_id {
+                break;
+            }
+            match came_from[current.0 as usize] {
+                Some(prev) => current = NavPolyId(prev),
                 None => break,
             }
         }

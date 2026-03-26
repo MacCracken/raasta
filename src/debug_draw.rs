@@ -4,12 +4,13 @@
 //! own graphics backend. No rendering dependency.
 
 use hisab::Vec2;
+use serde::{Deserialize, Serialize};
 
 use crate::grid::{GridPos, NavGrid};
 use crate::mesh::NavMesh;
 
 /// A colored line segment for debug rendering.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct DebugLine {
     pub start: Vec2,
     pub end: Vec2,
@@ -17,14 +18,14 @@ pub struct DebugLine {
 }
 
 /// A colored point for debug rendering.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct DebugPoint {
     pub position: Vec2,
     pub color: [f32; 4],
 }
 
 /// Collects debug geometry for visualization.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DebugDraw {
     pub lines: Vec<DebugLine>,
     pub points: Vec<DebugPoint>,
@@ -230,5 +231,23 @@ mod tests {
         dd.draw_navmesh(&mesh, [1.0; 4]);
         assert!(dd.lines.is_empty());
         assert!(dd.points.is_empty());
+    }
+
+    #[test]
+    fn debug_draw_serde_roundtrip() {
+        let mut dd = DebugDraw::new();
+        dd.lines.push(DebugLine {
+            start: Vec2::ZERO,
+            end: Vec2::ONE,
+            color: [1.0, 0.0, 0.0, 1.0],
+        });
+        dd.points.push(DebugPoint {
+            position: Vec2::new(0.5, 0.5),
+            color: [0.0, 1.0, 0.0, 1.0],
+        });
+        let json = serde_json::to_string(&dd).unwrap();
+        let deserialized: DebugDraw = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.lines.len(), 1);
+        assert_eq!(deserialized.points.len(), 1);
     }
 }

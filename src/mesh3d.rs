@@ -1,10 +1,13 @@
 //! 3D NavMesh — polygon-based navigation in 3D space.
 
 use std::cmp::Ordering;
-use std::collections::{BinaryHeap, HashMap, HashSet};
+use std::collections::BinaryHeap;
 
 use hisab::Vec3;
 use serde::{Deserialize, Serialize};
+
+#[cfg(feature = "logging")]
+use tracing::instrument;
 
 use crate::mesh::NavPolyId;
 
@@ -108,9 +111,13 @@ impl NavMesh3D {
         self.polys.len()
     }
 
+    /// Get a polygon by its ID.
+    ///
+    /// Assumes poly IDs are contiguous indices `0..poly_count()`.
+    #[inline]
     #[must_use]
     pub fn get_poly(&self, id: NavPolyId) -> Option<&NavPoly3D> {
-        self.polys.iter().find(|p| p.id == id)
+        self.polys.get(id.0 as usize).filter(|p| p.id == id)
     }
 
     /// Find which polygon contains the given point (projected onto polygon planes).
@@ -123,6 +130,7 @@ impl NavMesh3D {
     }
 
     /// Find a path between two points. Returns polygon IDs.
+    #[cfg_attr(feature = "logging", instrument(skip(self), fields(polys = self.polys.len())))]
     #[must_use]
     pub fn find_path(&self, start: Vec3, goal: Vec3) -> Option<Vec<NavPolyId>> {
         let start_id = self.find_poly_at(start)?;
@@ -132,12 +140,14 @@ impl NavMesh3D {
             return Some(vec![start_id]);
         }
 
-        let mut g_score = HashMap::new();
-        let mut came_from = HashMap::new();
-        let mut closed = HashSet::new();
+        let n = self.polys.len();
+        let mut g_score = vec![f32::INFINITY; n];
+        let mut came_from: Vec<Option<u32>> = vec![None; n];
+        let mut closed = vec![false; n];
         let mut open = BinaryHeap::new();
 
-        g_score.insert(start_id, 0.0f32);
+        let start_idx = start_id.0 as usize;
+        g_score[start_idx] = 0.0;
         let goal_centroid = self.get_poly(goal_id)?.centroid();
         let start_centroid = self.get_poly(start_id)?.centroid();
         let h = start_centroid.distance(goal_centroid);
@@ -149,19 +159,22 @@ impl NavMesh3D {
 
         while let Some(current) = open.pop() {
             if current.id == goal_id {
-                return Some(self.reconstruct_path(&came_from, goal_id));
+                return Some(Self::reconstruct_path_vec(&came_from, start_id, goal_id));
             }
 
-            if !closed.insert(current.id) {
+            let ci = current.id.0 as usize;
+            if closed[ci] {
                 continue;
             }
+            closed[ci] = true;
 
-            let current_g = g_score[&current.id];
+            let current_g = g_score[ci];
             let poly = self.get_poly(current.id)?;
             let current_centroid = poly.centroid();
 
             for &neighbor_id in &poly.neighbors {
-                if closed.contains(&neighbor_id) {
+                let ni = neighbor_id.0 as usize;
+                if ni >= n || closed[ni] {
                     continue;
                 }
                 let neighbor = self.get_poly(neighbor_id)?;
@@ -169,10 +182,9 @@ impl NavMesh3D {
                 let edge_cost = current_centroid.distance(neighbor_centroid);
                 let tentative_g = current_g + edge_cost;
 
-                let prev_g = g_score.get(&neighbor_id).copied().unwrap_or(f32::INFINITY);
-                if tentative_g < prev_g {
-                    came_from.insert(neighbor_id, current.id);
-                    g_score.insert(neighbor_id, tentative_g);
+                if tentative_g < g_score[ni] {
+                    came_from[ni] = Some(current.id.0);
+                    g_score[ni] = tentative_g;
                     let h = neighbor_centroid.distance(goal_centroid);
                     open.push(MeshNode3D {
                         id: neighbor_id,
@@ -185,17 +197,20 @@ impl NavMesh3D {
         None
     }
 
-    fn reconstruct_path(
-        &self,
-        came_from: &HashMap<NavPolyId, NavPolyId>,
+    fn reconstruct_path_vec(
+        came_from: &[Option<u32>],
+        start_id: NavPolyId,
         goal_id: NavPolyId,
     ) -> Vec<NavPolyId> {
         let mut path = Vec::new();
         let mut current = goal_id;
         loop {
             path.push(current);
-            match came_from.get(&current) {
-                Some(&prev) => current = prev,
+            if current == start_id {
+                break;
+            }
+            match came_from[current.0 as usize] {
+                Some(prev) => current = NavPolyId(prev),
                 None => break,
             }
         }

@@ -133,7 +133,11 @@ fn point_in_triangle(p: Vec2, a: Vec2, b: Vec2, c: Vec2) -> bool {
     let dot11 = v1.dot(v1);
     let dot12 = v1.dot(v2);
 
-    let inv_denom = 1.0 / (dot00 * dot11 - dot01 * dot01);
+    let denom = dot00 * dot11 - dot01 * dot01;
+    if denom.abs() < f32::EPSILON {
+        return false; // degenerate triangle (zero area)
+    }
+    let inv_denom = 1.0 / denom;
     let u = (dot11 * dot02 - dot01 * dot12) * inv_denom;
     let v = (dot00 * dot12 - dot01 * dot02) * inv_denom;
 

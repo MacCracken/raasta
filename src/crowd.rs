@@ -2,6 +2,9 @@
 
 use hisab::Vec2;
 
+#[cfg(feature = "logging")]
+use tracing::instrument;
+
 use crate::rvo::{RvoAgent, RvoSimulation};
 
 /// Crowd simulation with density-aware velocity damping.
@@ -67,6 +70,7 @@ impl CrowdSimulation {
     ///
     /// Computes a density map, damps preferred velocities in crowded areas,
     /// then runs the RVO step.
+    #[cfg_attr(feature = "logging", instrument(skip(self), fields(agents = self.agent_count())))]
     pub fn step(&mut self, dt: f32) {
         let n = self.agent_count();
         if n == 0 {
