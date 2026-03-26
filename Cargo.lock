@@ -363,7 +363,7 @@ dependencies = [
 
 [[package]]
 name = "raasta"
-version = "0.24.3"
+version = "0.26.3"
 dependencies = [
  "criterion",
  "hisab",
