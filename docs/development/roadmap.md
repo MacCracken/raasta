@@ -76,6 +76,22 @@
 - [ ] Agent radius erosion
 - [ ] 3D navigation volumes (voxel nav)
 
+## Cross-Crate Bridges
+
+- [ ] `bridge.rs` module — primitive-value conversions for cross-crate navigation
+- [ ] **impetus bridge**: collider positions/radii → navmesh obstacle holes; rigid body velocity → dynamic obstacle avoidance
+- [ ] **jantu bridge**: group target position → crowd destination; flee point → repulsion field center
+- [ ] **pavan bridge**: wind velocity [f32; 3] → movement cost modifier; terrain slope → traversal speed scaling
+
+## Soorat Integration
+
+- [ ] `integration/soorat.rs` module — feature-gated `soorat-compat`
+- [ ] **NavMesh wireframe**: polygon edges and vertices for debug line rendering
+- [ ] **Path visualization**: waypoint sequences with cost for colored line rendering
+- [ ] **Flow field**: grid of movement direction vectors for arrow rendering
+- [ ] **Crowd positions**: agent positions, velocities, and radii for instanced circle rendering
+- [ ] **HPA graph**: hierarchical cluster boundaries for debug overlay rendering
+
 ## Dependency Map
 
 ```

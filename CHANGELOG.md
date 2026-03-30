@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.27.0]
+
+### Added
+- **bridge** — cross-crate primitive-value bridges for impetus (collider to obstacle, velocity 3D to 2D), jantu (group target to destination, flee point to repulsion), pavan (wind to movement cost, slope to speed scale)
+- **integration/soorat** — feature-gated `soorat-compat` module with visualization data structures: `NavMeshWireframe` (edge pairs), `PathVisualization` (waypoints with cost), `FlowFieldVisualization` (direction grid), `CrowdVisualization` (agent positions/velocities/radii), `HpaOverlay` (cluster boundaries)
+
+### Updated
+- zerocopy 0.8.47 -> 0.8.48
+
 ## [0.26.3] — 2026-03-26
 
 ### Fixed

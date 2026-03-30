@@ -28,11 +28,15 @@
 //! ```
 
 mod agent;
+/// Cross-crate bridges — primitive-value conversions from other AGNOS science crates.
+pub mod bridge;
 mod crowd;
 mod debug_draw;
 mod follow;
 mod grid;
 mod hpa;
+/// Integration APIs for downstream consumers (soorat rendering).
+pub mod integration;
 mod mesh;
 mod mesh3d;
 mod path;
