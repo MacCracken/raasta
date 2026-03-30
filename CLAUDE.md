@@ -8,7 +8,8 @@
 - **License**: GPL-3.0-only
 - **MSRV**: 1.89
 - **Version**: SemVer 1.0.0
-- **Tests**: 514 (506 unit + 6 integration + 2 doc, with `parallel` feature)
+- **Tests**: 544 (536 unit + 6 integration + 2 doc, with `parallel` feature)
+- **Benchmarks**: 51 criterion benchmarks
 
 ## Consumers
 

@@ -101,8 +101,8 @@ Released 2026-03-29. All P0–P3 roadmap items complete (32/32). 502 tests, full
 - [x] Heightfield-based navmesh baking from 3D geometry (Recast-equivalent)
 - [x] SIMD-accelerated spatial hash / RVO — SOA layout, pre-allocated buffers, inline hot functions
 - [x] Parallel pathfinding (rayon integration) — feature-gated `parallel` module with par_iter batch operations
-- [ ] NavMesh auto-generation from physics colliders
-- [ ] Benchmark suite with history tracking
+- [x] NavMesh auto-generation from physics colliders — `navmesh_from_colliders()` with circle/AABB/convex poly support
+- [x] Benchmark suite with history tracking — 51 criterion benchmarks, `bench-history.sh` CSV tracking, coverage-check.sh
 
 ## Dependency Map
 

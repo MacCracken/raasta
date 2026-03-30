@@ -380,4 +380,107 @@ mod tests {
         assert!(c.is_at_end());
         assert_eq!(c.remaining_polys(), 1);
     }
+
+    #[test]
+    fn corridor_move_backward() {
+        let mesh = make_three_poly_mesh();
+        let mut c = PathCorridor::new(
+            vec![NavPolyId(0), NavPolyId(1), NavPolyId(2)],
+            Vec2::new(25.0, 5.0),
+            Vec2::new(25.0, 5.0),
+        )
+        .unwrap();
+        // Advance to last poly
+        c.move_position(&mesh, Vec2::new(25.0, 5.0));
+        assert_eq!(c.current_index(), 2);
+        // Move backward to first poly
+        c.move_position(&mesh, Vec2::new(5.0, 5.0));
+        assert_eq!(c.current_index(), 0);
+    }
+
+    #[test]
+    fn corridor_move_off_mesh() {
+        let mesh = make_three_poly_mesh();
+        let mut c = PathCorridor::new(
+            vec![NavPolyId(0), NavPolyId(1), NavPolyId(2)],
+            Vec2::new(5.0, 5.0),
+            Vec2::new(25.0, 5.0),
+        )
+        .unwrap();
+        // Move to a position not in any corridor poly
+        c.move_position(&mesh, Vec2::new(100.0, 100.0));
+        // Should keep current_idx unchanged
+        assert_eq!(c.current_index(), 0);
+    }
+
+    #[test]
+    fn corridor_replan_local() {
+        let mesh = make_three_poly_mesh();
+        let mut c = PathCorridor::new(
+            vec![NavPolyId(0), NavPolyId(1), NavPolyId(2)],
+            Vec2::new(5.0, 5.0),
+            Vec2::new(25.0, 5.0),
+        )
+        .unwrap();
+        // Replan local from current to rejoin at poly 2
+        let result = c.replan_local(&mesh, 2);
+        assert!(result);
+        assert!(!c.polys().is_empty());
+    }
+
+    #[test]
+    fn corridor_replan_local_at_current() {
+        let mesh = make_three_poly_mesh();
+        let mut c = PathCorridor::new(
+            vec![NavPolyId(0), NavPolyId(1), NavPolyId(2)],
+            Vec2::new(5.0, 5.0),
+            Vec2::new(25.0, 5.0),
+        )
+        .unwrap();
+        // rejoin_idx <= current_idx falls back to full replan
+        let result = c.replan_local(&mesh, 0);
+        assert!(result);
+    }
+
+    #[test]
+    fn corridor_smooth_path_single_poly() {
+        let mesh = make_three_poly_mesh();
+        let c = PathCorridor::new(vec![NavPolyId(0)], Vec2::new(5.0, 5.0), Vec2::new(8.0, 8.0))
+            .unwrap();
+        let smooth = c.smooth_path(&mesh, 0.0);
+        assert_eq!(smooth.len(), 2);
+        assert_eq!(smooth[0], Vec2::new(5.0, 5.0));
+        assert_eq!(smooth[1], Vec2::new(8.0, 8.0));
+    }
+
+    #[test]
+    fn corridor_smooth_path_multi_poly() {
+        let mesh = make_three_poly_mesh();
+        let c = PathCorridor::find(&mesh, Vec2::new(5.0, 5.0), Vec2::new(25.0, 5.0)).unwrap();
+        let smooth = c.smooth_path(&mesh, 0.0);
+        // Should produce at least start and goal
+        assert!(smooth.len() >= 2);
+    }
+
+    #[test]
+    fn corridor_smooth_path_with_radius() {
+        let mesh = make_three_poly_mesh();
+        let c = PathCorridor::find(&mesh, Vec2::new(5.0, 5.0), Vec2::new(25.0, 5.0)).unwrap();
+        let smooth = c.smooth_path(&mesh, 0.5);
+        assert!(smooth.len() >= 2);
+    }
+
+    #[test]
+    fn corridor_trim_at_zero() {
+        let mut c = PathCorridor::new(
+            vec![NavPolyId(0), NavPolyId(1)],
+            Vec2::new(5.0, 5.0),
+            Vec2::new(15.0, 5.0),
+        )
+        .unwrap();
+        // current_idx is 0, trim should be a no-op
+        c.trim_passed();
+        assert_eq!(c.polys().len(), 2);
+        assert_eq!(c.current_index(), 0);
+    }
 }

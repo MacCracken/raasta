@@ -32,6 +32,7 @@ mod batch;
 mod blend;
 /// Cross-crate bridges — primitive-value conversions from other AGNOS science crates.
 pub mod bridge;
+mod collider_nav;
 mod corridor;
 mod crowd;
 mod debug_draw;
@@ -72,6 +73,9 @@ pub use hisab::{Vec2, Vec3};
 pub use agent::Agent;
 pub use batch::{BatchedResult, PathBatcher, PathRequestId, QueuedRequest, RequestPriority};
 pub use blend::{PrioritizedSteer, WeightedSteer, blend_priority, blend_weighted};
+pub use collider_nav::{
+    ColliderNavConfig, ColliderShape, navmesh_from_colliders, navmesh_from_colliders_rect,
+};
 pub use corridor::PathCorridor;
 pub use crowd::CrowdSimulation;
 pub use debug_draw::{DebugDraw, DebugLine, DebugPoint};
