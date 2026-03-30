@@ -21,6 +21,7 @@ pub struct NavPoly3D {
 
 impl NavPoly3D {
     /// Compute the centroid of this polygon.
+    #[cfg_attr(feature = "logging", instrument(skip(self)))]
     #[must_use]
     pub fn centroid(&self) -> Vec3 {
         if self.vertices.is_empty() {
@@ -31,6 +32,7 @@ impl NavPoly3D {
     }
 
     /// Normal of the polygon plane (assumes convex, CCW winding).
+    #[cfg_attr(feature = "logging", instrument(skip(self)))]
     #[must_use]
     pub fn normal(&self) -> Vec3 {
         if self.vertices.len() < 3 {
@@ -42,6 +44,7 @@ impl NavPoly3D {
     }
 
     /// Project a 3D point onto this polygon's plane and check if it's inside.
+    #[cfg_attr(feature = "logging", instrument(skip(self)))]
     #[must_use]
     pub fn contains_point_projected(&self, point: Vec3) -> bool {
         let n = self.vertices.len();
@@ -92,20 +95,24 @@ pub struct NavMesh3D {
 }
 
 impl NavMesh3D {
+    #[cfg_attr(feature = "logging", instrument)]
     #[must_use]
     pub fn new() -> Self {
         Self { polys: Vec::new() }
     }
 
+    #[cfg_attr(feature = "logging", instrument(skip(self)))]
     pub fn add_poly(&mut self, poly: NavPoly3D) {
         self.polys.push(poly);
     }
 
+    #[cfg_attr(feature = "logging", instrument(skip(self)))]
     #[must_use]
     pub fn polys(&self) -> &[NavPoly3D] {
         &self.polys
     }
 
+    #[cfg_attr(feature = "logging", instrument(skip(self)))]
     #[must_use]
     pub fn poly_count(&self) -> usize {
         self.polys.len()
@@ -114,6 +121,7 @@ impl NavMesh3D {
     /// Get a polygon by its ID.
     ///
     /// Assumes poly IDs are contiguous indices `0..poly_count()`.
+    #[cfg_attr(feature = "logging", instrument(skip(self)))]
     #[inline]
     #[must_use]
     pub fn get_poly(&self, id: NavPolyId) -> Option<&NavPoly3D> {
@@ -121,6 +129,7 @@ impl NavMesh3D {
     }
 
     /// Find which polygon contains the given point (projected onto polygon planes).
+    #[cfg_attr(feature = "logging", instrument(skip(self)))]
     #[must_use]
     pub fn find_poly_at(&self, point: Vec3) -> Option<NavPolyId> {
         self.polys

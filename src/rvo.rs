@@ -29,6 +29,7 @@ pub struct RvoAgent {
 }
 
 impl RvoAgent {
+    #[cfg_attr(feature = "logging", instrument)]
     #[must_use]
     pub fn new(position: Vec2, radius: f32, max_speed: f32) -> Self {
         Self {
@@ -46,6 +47,7 @@ impl RvoAgent {
 /// Returns the half-plane that agent A should respect to avoid
 /// collision with agent B within `time_horizon` seconds.
 /// Each agent takes half the responsibility (reciprocal).
+#[cfg_attr(feature = "logging", instrument)]
 #[must_use]
 pub fn compute_orca_half_plane(a: &RvoAgent, b: &RvoAgent, time_horizon: f32) -> HalfPlane {
     let relative_pos = b.position - a.position;
@@ -132,6 +134,7 @@ pub fn compute_orca_half_plane(a: &RvoAgent, b: &RvoAgent, time_horizon: f32) ->
 ///
 /// Uses 2D incremental linear programming: processes constraints one at a
 /// time, projecting onto the constraint boundary when violated.
+#[cfg_attr(feature = "logging", instrument)]
 #[must_use]
 pub fn solve_velocity(constraints: &[HalfPlane], preferred: Vec2, max_speed: f32) -> Vec2 {
     // Start with preferred velocity, clamped to max speed
@@ -253,6 +256,7 @@ pub struct RvoSimulation {
 
 impl RvoSimulation {
     /// Create a new simulation with the given time horizon.
+    #[cfg_attr(feature = "logging", instrument)]
     #[must_use]
     pub fn new(time_horizon: f32) -> Self {
         Self {
@@ -262,6 +266,7 @@ impl RvoSimulation {
     }
 
     /// Add an agent and return its index.
+    #[cfg_attr(feature = "logging", instrument(skip(self)))]
     pub fn add_agent(&mut self, agent: RvoAgent) -> usize {
         let idx = self.agents.len();
         self.agents.push(agent);
@@ -269,23 +274,27 @@ impl RvoSimulation {
     }
 
     /// Number of agents.
+    #[cfg_attr(feature = "logging", instrument(skip(self)))]
     #[must_use]
     pub fn agent_count(&self) -> usize {
         self.agents.len()
     }
 
     /// Get an agent by index.
+    #[cfg_attr(feature = "logging", instrument(skip(self)))]
     #[must_use]
     pub fn agent(&self, idx: usize) -> &RvoAgent {
         &self.agents[idx]
     }
 
     /// Mutable access to an agent.
+    #[cfg_attr(feature = "logging", instrument(skip(self)))]
     pub fn agent_mut(&mut self, idx: usize) -> &mut RvoAgent {
         &mut self.agents[idx]
     }
 
     /// Set the preferred velocity for an agent.
+    #[cfg_attr(feature = "logging", instrument(skip(self)))]
     pub fn set_preferred_velocity(&mut self, idx: usize, velocity: Vec2) {
         self.agents[idx].preferred_velocity = velocity;
     }

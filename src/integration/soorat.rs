@@ -4,6 +4,8 @@
 //! consume directly for debug rendering, plus conversion functions from raasta
 //! core types.
 
+#[cfg(feature = "logging")]
+use tracing::instrument;
 use serde::{Deserialize, Serialize};
 
 use crate::crowd::CrowdSimulation;
@@ -26,6 +28,7 @@ impl NavMeshWireframe {
     ///
     /// Vertices are projected to Y=0 in world space.
     #[must_use]
+    #[cfg_attr(feature = "logging", tracing::instrument(skip_all))]
     pub fn from_navmesh(mesh: &NavMesh) -> Self {
         let mut edges = Vec::new();
         for poly in mesh.polys() {
@@ -61,6 +64,7 @@ impl PathVisualization {
     /// Waypoints are projected to Y=0. Cost at each waypoint is the
     /// cumulative Euclidean distance from the start.
     #[must_use]
+    #[cfg_attr(feature = "logging", tracing::instrument(skip_all))]
     pub fn from_path_result(result: &PathResult) -> Self {
         let waypoints: Vec<[f32; 3]> = result.waypoints.iter().map(|v| [v.x, 0.0, v.y]).collect();
 
@@ -101,6 +105,7 @@ impl FlowFieldVisualization {
     ///
     /// `flow` is the direction array from [`NavGrid::flow_field`].
     #[must_use]
+    #[cfg_attr(feature = "logging", tracing::instrument(skip_all))]
     pub fn from_flow_field(flow: &[(i32, i32)], grid: &NavGrid) -> Self {
         let directions: Vec<[f32; 2]> = flow
             .iter()
@@ -137,6 +142,7 @@ pub struct CrowdVisualization {
 impl CrowdVisualization {
     /// Build a crowd visualization from a [`CrowdSimulation`].
     #[must_use]
+    #[cfg_attr(feature = "logging", tracing::instrument(skip_all))]
     pub fn from_crowd(crowd: &CrowdSimulation) -> Self {
         let count = crowd.agent_count();
         let mut positions = Vec::with_capacity(count);
@@ -170,6 +176,7 @@ pub struct HpaOverlay {
 impl HpaOverlay {
     /// Build an HPA overlay from [`GridClusters`] and its source [`NavGrid`].
     #[must_use]
+    #[cfg_attr(feature = "logging", tracing::instrument(skip_all))]
     pub fn from_clusters(clusters: &GridClusters, grid: &NavGrid) -> Self {
         let cw = clusters.clusters_wide();
         let ch = clusters.clusters_high();

@@ -196,12 +196,11 @@ pub fn merge_convex(vertices: &[Vec2], triangles: &[(usize, usize, usize)]) -> V
             };
 
             let (pa, pb) = (owners[0], owners[1]);
-            if polys[pa].is_none() || polys[pb].is_none() {
-                continue;
-            }
-
-            let poly_a = polys[pa].as_ref().unwrap().clone();
-            let poly_b = polys[pb].as_ref().unwrap().clone();
+            let (poly_a, poly_b) =
+                match (polys[pa].as_ref(), polys[pb].as_ref()) {
+                    (Some(a), Some(b)) => (a.clone(), b.clone()),
+                    _ => continue,
+                };
 
             if let Some(merged_poly) = try_merge(vertices, &poly_a, &poly_b, key) {
                 // Remove old edges from map

@@ -6,6 +6,8 @@ use std::collections::BinaryHeap;
 use hisab::Vec2;
 use serde::{Deserialize, Serialize};
 
+use crate::error::NavError;
+
 #[cfg(feature = "logging")]
 use tracing::instrument;
 
@@ -65,16 +67,27 @@ impl NavGrid {
     /// Panics if `width * height` overflows `usize`.
     #[must_use]
     pub fn new(width: usize, height: usize, cell_size: f32) -> Self {
-        let len = width.checked_mul(height).expect("grid dimensions overflow");
+        Self::try_new(width, height, cell_size).expect("grid dimensions overflow")
+    }
+
+    /// Fallible constructor — returns an error instead of panicking on overflow.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`NavError::GridOverflow`] if `width * height` overflows `usize`.
+    pub fn try_new(width: usize, height: usize, cell_size: f32) -> Result<Self, NavError> {
+        let len = width
+            .checked_mul(height)
+            .ok_or(NavError::GridOverflow { width, height })?;
         let bitset_len = len.div_ceil(64);
-        Self {
+        Ok(Self {
             width,
             height,
             cell_size,
             walkable: vec![u64::MAX; bitset_len], // all bits set = all walkable
             costs: vec![1.0; len],
             allow_diagonal: true,
-        }
+        })
     }
 
     #[must_use]
@@ -1248,6 +1261,19 @@ mod tests {
     #[should_panic(expected = "grid dimensions overflow")]
     fn grid_overflow_panics() {
         let _ = NavGrid::new(usize::MAX, 2, 1.0);
+    }
+
+    #[test]
+    fn try_new_overflow_returns_error() {
+        let result = NavGrid::try_new(usize::MAX, 2, 1.0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn try_new_success() {
+        let result = NavGrid::try_new(5, 5, 1.0);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().width(), 5);
     }
 
     // --- JPS tests ---

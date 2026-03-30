@@ -1,5 +1,8 @@
 //! Steering behaviors — seek, flee, arrive, obstacle avoidance.
 
+#[cfg(feature = "logging")]
+use tracing::instrument;
+
 use hisab::Vec2;
 use serde::{Deserialize, Serialize};
 
@@ -34,6 +37,7 @@ pub struct SteerOutput {
 }
 
 impl SteerOutput {
+    #[cfg_attr(feature = "logging", tracing::instrument)]
     #[must_use]
     pub fn new(vx: f32, vy: f32) -> Self {
         Self {
@@ -42,12 +46,14 @@ impl SteerOutput {
     }
 
     /// Construct from a `Vec2` directly.
+    #[cfg_attr(feature = "logging", tracing::instrument)]
     #[must_use]
     pub fn from_vec2(velocity: Vec2) -> Self {
         Self { velocity }
     }
 
     /// Magnitude of the velocity.
+    #[cfg_attr(feature = "logging", tracing::instrument(skip(self)))]
     #[inline]
     #[must_use]
     pub fn speed(&self) -> f32 {
@@ -59,6 +65,7 @@ impl SteerOutput {
 ///
 /// - `position`: current agent position
 /// - `max_speed`: maximum speed the agent can move
+#[cfg_attr(feature = "logging", tracing::instrument)]
 #[inline]
 #[must_use]
 pub fn compute_steer(behavior: &SteerBehavior, position: Vec2, max_speed: f32) -> SteerOutput {

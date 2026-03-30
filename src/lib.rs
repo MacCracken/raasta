@@ -31,6 +31,7 @@ mod agent;
 /// Cross-crate bridges — primitive-value conversions from other AGNOS science crates.
 pub mod bridge;
 mod crowd;
+mod error;
 mod debug_draw;
 mod follow;
 mod grid;
@@ -53,6 +54,7 @@ pub mod logging;
 pub use hisab::{Vec2, Vec3};
 
 pub use agent::Agent;
+pub use error::NavError;
 pub use crowd::CrowdSimulation;
 pub use debug_draw::{DebugDraw, DebugLine, DebugPoint};
 pub use follow::PathFollower;

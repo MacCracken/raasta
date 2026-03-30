@@ -4,10 +4,12 @@
 
 /// Initialise raasta logging with the `RAASTA_LOG` environment variable.
 /// Falls back to `info` if not set. Safe to call multiple times.
+#[tracing::instrument]
 pub fn init() {
     init_with_level("info");
 }
 
+#[tracing::instrument]
 pub fn init_with_level(default_level: &str) {
     use tracing_subscriber::EnvFilter;
     use tracing_subscriber::fmt;

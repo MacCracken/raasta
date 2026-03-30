@@ -3,6 +3,9 @@
 //! Produces line segments and points that consumers can render with their
 //! own graphics backend. No rendering dependency.
 
+#[cfg(feature = "logging")]
+use tracing::instrument;
+
 use hisab::Vec2;
 use serde::{Deserialize, Serialize};
 
@@ -33,11 +36,13 @@ pub struct DebugDraw {
 
 impl DebugDraw {
     #[must_use]
+    #[cfg_attr(feature = "logging", tracing::instrument)]
     pub fn new() -> Self {
         Self::default()
     }
 
     /// Clear all collected geometry.
+    #[cfg_attr(feature = "logging", tracing::instrument(skip(self)))]
     pub fn clear(&mut self) {
         self.lines.clear();
         self.points.clear();

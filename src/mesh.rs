@@ -25,6 +25,7 @@ pub struct NavPoly {
 
 impl NavPoly {
     /// Compute the centroid of this polygon.
+    #[cfg_attr(feature = "logging", instrument(skip(self)))]
     #[must_use]
     pub fn centroid(&self) -> Vec2 {
         if self.vertices.is_empty() {
@@ -35,6 +36,7 @@ impl NavPoly {
     }
 
     /// Check if a point is inside this convex polygon (2D, XY plane).
+    #[cfg_attr(feature = "logging", instrument(skip(self)))]
     #[must_use]
     pub fn contains_point(&self, point: Vec2) -> bool {
         let n = self.vertices.len();
@@ -65,6 +67,7 @@ pub struct NavMesh {
 }
 
 impl NavMesh {
+    #[cfg_attr(feature = "logging", instrument)]
     #[must_use]
     pub fn new() -> Self {
         Self { polys: Vec::new() }
@@ -136,11 +139,13 @@ impl NavMesh {
     }
 
     /// Add a polygon to the mesh.
+    #[cfg_attr(feature = "logging", instrument(skip(self)))]
     pub fn add_poly(&mut self, poly: NavPoly) {
         self.polys.push(poly);
     }
 
     /// Get all polygons.
+    #[cfg_attr(feature = "logging", instrument(skip(self)))]
     #[must_use]
     pub fn polys(&self) -> &[NavPoly] {
         &self.polys
@@ -149,6 +154,7 @@ impl NavMesh {
     /// Get a polygon by its ID.
     ///
     /// Assumes poly IDs are contiguous indices `0..poly_count()`.
+    #[cfg_attr(feature = "logging", instrument(skip(self)))]
     #[inline]
     #[must_use]
     pub fn get_poly(&self, id: NavPolyId) -> Option<&NavPoly> {
@@ -156,6 +162,7 @@ impl NavMesh {
     }
 
     /// Find which polygon contains the given point.
+    #[cfg_attr(feature = "logging", instrument(skip(self)))]
     #[must_use]
     pub fn find_poly_at(&self, point: Vec2) -> Option<NavPolyId> {
         self.polys
@@ -167,6 +174,7 @@ impl NavMesh {
     /// Find the closest point on the navmesh to the given point.
     ///
     /// Returns the nearest point on any polygon, or `None` if the mesh is empty.
+    #[cfg_attr(feature = "logging", instrument(skip(self)))]
     #[must_use]
     pub fn closest_point(&self, point: Vec2) -> Option<Vec2> {
         if self.polys.is_empty() {
@@ -303,6 +311,7 @@ impl NavMesh {
     }
 
     /// Number of polygons in the mesh.
+    #[cfg_attr(feature = "logging", instrument(skip(self)))]
     #[must_use]
     pub fn poly_count(&self) -> usize {
         self.polys.len()

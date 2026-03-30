@@ -1,5 +1,8 @@
 //! Agent — ties position, velocity, path following, and steering together.
 
+#[cfg(feature = "logging")]
+use tracing::instrument;
+
 use hisab::Vec2;
 use serde::{Deserialize, Serialize};
 
@@ -19,6 +22,7 @@ pub struct Agent {
 impl Agent {
     /// Create a new agent at the given position.
     #[must_use]
+    #[cfg_attr(feature = "logging", tracing::instrument)]
     pub fn new(position: Vec2, max_speed: f32, max_force: f32) -> Self {
         Self {
             position,
@@ -30,17 +34,20 @@ impl Agent {
     }
 
     /// Assign a path for this agent to follow.
+    #[cfg_attr(feature = "logging", tracing::instrument(skip(self)))]
     pub fn set_path(&mut self, follower: PathFollower) {
         self.follower = Some(follower);
     }
 
     /// Clear the current path.
+    #[cfg_attr(feature = "logging", tracing::instrument(skip(self)))]
     pub fn clear_path(&mut self) {
         self.follower = None;
     }
 
     /// Whether the agent has an active (unfinished) path.
     #[must_use]
+    #[cfg_attr(feature = "logging", tracing::instrument(skip(self)))]
     pub fn has_path(&self) -> bool {
         self.follower.as_ref().is_some_and(|f| !f.is_finished())
     }
