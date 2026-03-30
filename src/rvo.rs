@@ -943,4 +943,71 @@ mod tests {
         assert!((soa.radii[0] - 0.5).abs() < f32::EPSILON);
         assert!((soa.max_speeds[1] - 6.0).abs() < f32::EPSILON);
     }
+
+    #[test]
+    fn rvo_zero_agents_step() {
+        let mut sim = RvoSimulation::new(2.0);
+        sim.step(0.1); // Should not panic
+        assert_eq!(sim.agent_count(), 0);
+    }
+
+    #[test]
+    fn rvo_agent_zero_radius() {
+        let mut sim = RvoSimulation::new(2.0);
+        let a = sim.add_agent(RvoAgent::new(Vec2::ZERO, 0.0, 2.0));
+        let b = sim.add_agent(RvoAgent::new(Vec2::new(1.0, 0.0), 0.0, 2.0));
+        sim.set_preferred_velocity(a, Vec2::new(1.0, 0.0));
+        sim.set_preferred_velocity(b, Vec2::new(-1.0, 0.0));
+        sim.step(0.1); // Should not panic
+    }
+
+    #[test]
+    fn rvo_agent_zero_max_speed() {
+        let mut sim = RvoSimulation::new(2.0);
+        let a = sim.add_agent(RvoAgent::new(Vec2::ZERO, 0.5, 0.0));
+        sim.set_preferred_velocity(a, Vec2::new(1.0, 0.0));
+        sim.step(0.1);
+        // Agent should not move (max_speed = 0)
+        assert!(sim.agent(a).velocity.length() < f32::EPSILON);
+    }
+
+    #[test]
+    fn rvo_1000_agents_stress() {
+        let mut sim = RvoSimulation::with_neighbor_dist(2.0, 5.0);
+        for i in 0..1000 {
+            let x = (i % 32) as f32 * 2.0;
+            let y = (i / 32) as f32 * 2.0;
+            let idx = sim.add_agent(RvoAgent::new(Vec2::new(x, y), 0.3, 2.0));
+            sim.set_preferred_velocity(idx, Vec2::new(1.0, 0.0));
+        }
+        // Should complete without panic in reasonable time
+        sim.step(0.016);
+        assert_eq!(sim.agent_count(), 1000);
+    }
+
+    #[test]
+    fn rvo_head_on_agents_avoid() {
+        let mut sim = RvoSimulation::new(2.0);
+        let a = sim.add_agent(RvoAgent::new(Vec2::new(0.0, 0.0), 0.5, 2.0));
+        let b = sim.add_agent(RvoAgent::new(Vec2::new(5.0, 0.0), 0.5, 2.0));
+        sim.set_preferred_velocity(a, Vec2::new(2.0, 0.0));
+        sim.set_preferred_velocity(b, Vec2::new(-2.0, 0.0));
+
+        for _ in 0..50 {
+            sim.step(0.05);
+        }
+        // Agents should have avoided each other (not be overlapping)
+        let dist = sim.agent(a).position.distance(sim.agent(b).position);
+        assert!(dist >= 0.8); // Close to combined radii
+    }
+
+    #[test]
+    fn rvo_single_agent_no_constraints() {
+        let mut sim = RvoSimulation::new(2.0);
+        let a = sim.add_agent(RvoAgent::new(Vec2::ZERO, 0.5, 2.0));
+        sim.set_preferred_velocity(a, Vec2::new(1.0, 0.0));
+        sim.step(0.1);
+        // Should move at preferred velocity (no constraints)
+        assert!((sim.agent(a).velocity.x - 1.0).abs() < 0.01);
+    }
 }

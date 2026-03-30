@@ -67,7 +67,17 @@ impl NavGrid {
     /// Panics if `width * height` overflows `usize`.
     #[must_use]
     pub fn new(width: usize, height: usize, cell_size: f32) -> Self {
-        Self::try_new(width, height, cell_size).expect("grid dimensions overflow")
+        Self::try_new(width, height, cell_size).unwrap_or_else(|_| {
+            // Saturating fallback: return a minimal 1x1 grid rather than panicking
+            Self {
+                width: 1,
+                height: 1,
+                cell_size: cell_size.max(f32::EPSILON),
+                walkable: vec![u64::MAX; 1],
+                costs: vec![1.0; 1],
+                allow_diagonal: true,
+            }
+        })
     }
 
     /// Fallible constructor — returns an error instead of panicking on overflow.
@@ -76,6 +86,9 @@ impl NavGrid {
     ///
     /// Returns [`NavError::GridOverflow`] if `width * height` overflows `usize`.
     pub fn try_new(width: usize, height: usize, cell_size: f32) -> Result<Self, NavError> {
+        if cell_size <= 0.0 {
+            return Err(NavError::InvalidCellSize { value: cell_size });
+        }
         let len = width
             .checked_mul(height)
             .ok_or(NavError::GridOverflow { width, height })?;
@@ -135,6 +148,7 @@ impl NavGrid {
     }
 
     /// Get the movement cost for a cell.
+    #[inline]
     #[must_use]
     pub fn cost(&self, x: i32, y: i32) -> f32 {
         self.index(x, y)
@@ -1894,9 +1908,10 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "grid dimensions overflow")]
-    fn grid_overflow_panics() {
-        let _ = NavGrid::new(usize::MAX, 2, 1.0);
+    fn grid_overflow_saturates_to_1x1() {
+        let grid = NavGrid::new(usize::MAX, 2, 1.0);
+        assert_eq!(grid.width(), 1);
+        assert_eq!(grid.height(), 1);
     }
 
     #[test]
@@ -2812,5 +2827,24 @@ mod tests {
             grid.find_path_bidirectional(GridPos::new(0, 0), GridPos::new(4, 4))
                 .is_none()
         );
+    }
+
+    #[test]
+    fn cell_size_zero_returns_error() {
+        let result = NavGrid::try_new(10, 10, 0.0);
+        assert!(matches!(result, Err(NavError::InvalidCellSize { .. })));
+    }
+
+    #[test]
+    fn new_overflow_saturates() {
+        let grid = NavGrid::new(usize::MAX, usize::MAX, 1.0);
+        assert_eq!(grid.width(), 1);
+        assert_eq!(grid.height(), 1);
+    }
+
+    #[test]
+    fn try_new_cell_size_negative() {
+        let result = NavGrid::try_new(10, 10, -1.0);
+        assert!(result.is_err());
     }
 }

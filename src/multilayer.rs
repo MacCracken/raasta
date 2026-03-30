@@ -458,4 +458,199 @@ mod tests {
         assert_eq!(deserialized.connections().len(), 1);
         assert!((deserialized.connections()[0].cost - 3.0).abs() < f32::EPSILON);
     }
+
+    /// Build a single-polygon navmesh for layer connection tests.
+    fn make_single_poly_mesh() -> NavMesh {
+        let mut mesh = NavMesh::new();
+        mesh.add_poly(NavPoly {
+            id: NavPolyId(0),
+            vertices: vec![
+                Vec2::ZERO,
+                Vec2::new(10.0, 0.0),
+                Vec2::new(10.0, 10.0),
+                Vec2::new(0.0, 10.0),
+            ],
+            neighbors: vec![],
+            cost: 1.0,
+            layer: 0,
+        });
+        mesh
+    }
+
+    #[test]
+    fn multilayer_cyclic_connections() {
+        let mut ml = MultiLayerNavMesh::new();
+        // Three layers
+        for lid in 0..3u32 {
+            ml.add_layer(LayerId(lid), make_single_poly_mesh());
+        }
+        // Cyclic: 0->1, 1->2, 2->0
+        ml.add_connection(LayerConnection {
+            from: LayeredPolyId {
+                layer: LayerId(0),
+                poly: NavPolyId(0),
+            },
+            to: LayeredPolyId {
+                layer: LayerId(1),
+                poly: NavPolyId(0),
+            },
+            cost: 1.0,
+            bidirectional: false,
+        });
+        ml.add_connection(LayerConnection {
+            from: LayeredPolyId {
+                layer: LayerId(1),
+                poly: NavPolyId(0),
+            },
+            to: LayeredPolyId {
+                layer: LayerId(2),
+                poly: NavPolyId(0),
+            },
+            cost: 1.0,
+            bidirectional: false,
+        });
+        ml.add_connection(LayerConnection {
+            from: LayeredPolyId {
+                layer: LayerId(2),
+                poly: NavPolyId(0),
+            },
+            to: LayeredPolyId {
+                layer: LayerId(0),
+                poly: NavPolyId(0),
+            },
+            cost: 1.0,
+            bidirectional: false,
+        });
+
+        // Should find path from layer 0 to layer 2 via layer 1
+        let path = ml.find_path(
+            LayerId(0),
+            Vec2::new(5.0, 5.0),
+            LayerId(2),
+            Vec2::new(5.0, 5.0),
+        );
+        assert!(path.is_some());
+    }
+
+    #[test]
+    fn multilayer_many_layers() {
+        let mut ml = MultiLayerNavMesh::new();
+        for lid in 0..10u32 {
+            ml.add_layer(LayerId(lid), make_single_poly_mesh());
+            if lid > 0 {
+                ml.add_connection(LayerConnection {
+                    from: LayeredPolyId {
+                        layer: LayerId(lid - 1),
+                        poly: NavPolyId(0),
+                    },
+                    to: LayeredPolyId {
+                        layer: LayerId(lid),
+                        poly: NavPolyId(0),
+                    },
+                    cost: 1.0,
+                    bidirectional: true,
+                });
+            }
+        }
+        assert_eq!(ml.layer_count(), 10);
+        let path = ml.find_path(
+            LayerId(0),
+            Vec2::new(5.0, 5.0),
+            LayerId(9),
+            Vec2::new(5.0, 5.0),
+        );
+        assert!(path.is_some());
+    }
+
+    #[test]
+    fn multilayer_three_layer_path() {
+        let mut ml = MultiLayerNavMesh::new();
+        for lid in 0..3u32 {
+            ml.add_layer(LayerId(lid), make_single_poly_mesh());
+        }
+        ml.add_connection(LayerConnection {
+            from: LayeredPolyId {
+                layer: LayerId(0),
+                poly: NavPolyId(0),
+            },
+            to: LayeredPolyId {
+                layer: LayerId(1),
+                poly: NavPolyId(0),
+            },
+            cost: 1.0,
+            bidirectional: true,
+        });
+        ml.add_connection(LayerConnection {
+            from: LayeredPolyId {
+                layer: LayerId(1),
+                poly: NavPolyId(0),
+            },
+            to: LayeredPolyId {
+                layer: LayerId(2),
+                poly: NavPolyId(0),
+            },
+            cost: 1.0,
+            bidirectional: true,
+        });
+        let path = ml.find_path(
+            LayerId(0),
+            Vec2::new(5.0, 5.0),
+            LayerId(2),
+            Vec2::new(5.0, 5.0),
+        );
+        assert!(path.is_some());
+        assert_eq!(path.unwrap().len(), 3); // Through all three layers
+    }
+
+    #[test]
+    fn multilayer_remove_connected_layer() {
+        let mut ml = MultiLayerNavMesh::new();
+        for lid in 0..3u32 {
+            ml.add_layer(LayerId(lid), make_single_poly_mesh());
+        }
+        ml.add_connection(LayerConnection {
+            from: LayeredPolyId {
+                layer: LayerId(0),
+                poly: NavPolyId(0),
+            },
+            to: LayeredPolyId {
+                layer: LayerId(1),
+                poly: NavPolyId(0),
+            },
+            cost: 1.0,
+            bidirectional: true,
+        });
+        ml.add_connection(LayerConnection {
+            from: LayeredPolyId {
+                layer: LayerId(1),
+                poly: NavPolyId(0),
+            },
+            to: LayeredPolyId {
+                layer: LayerId(2),
+                poly: NavPolyId(0),
+            },
+            cost: 1.0,
+            bidirectional: true,
+        });
+
+        // Remove middle layer — connections should be cleaned up
+        ml.remove_layer(LayerId(1));
+        assert_eq!(ml.layer_count(), 2);
+        // Connections involving layer 1 should be gone
+        assert!(
+            ml.connections()
+                .iter()
+                .all(|c| c.from.layer != LayerId(1) && c.to.layer != LayerId(1))
+        );
+        // No path from 0 to 2 anymore
+        assert!(
+            ml.find_path(
+                LayerId(0),
+                Vec2::new(5.0, 5.0),
+                LayerId(2),
+                Vec2::new(5.0, 5.0),
+            )
+            .is_none()
+        );
+    }
 }

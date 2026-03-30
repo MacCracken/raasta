@@ -110,12 +110,14 @@ impl IncrementalGridPath {
         let allow_diagonal = grid.allow_diagonal;
 
         // Compute start/goal indices manually (same as grid.index())
-        let start_idx = start.y as usize * grid_width + start.x as usize;
-        let goal_idx = goal.y as usize * grid_width + goal.x as usize;
-
-        if start_idx >= len || goal_idx >= len {
-            return None;
-        }
+        let start_idx = (start.y as usize)
+            .checked_mul(grid_width)
+            .and_then(|v| v.checked_add(start.x as usize))
+            .filter(|&idx| idx < len)?;
+        let goal_idx = (goal.y as usize)
+            .checked_mul(grid_width)
+            .and_then(|v| v.checked_add(goal.x as usize))
+            .filter(|&idx| idx < len)?;
 
         let mut g_score = vec![f32::INFINITY; len];
         g_score[start_idx] = 0.0;

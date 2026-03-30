@@ -66,6 +66,7 @@ impl NavVolume {
     /// Create a new volume where all cells are navigable.
     #[must_use]
     pub fn new(width: usize, height: usize, depth: usize, cell_size: f32) -> Self {
+        let cell_size = cell_size.max(f32::EPSILON);
         let len = width * height * depth;
         let bitset_len = len.div_ceil(64);
         Self {
@@ -391,5 +392,77 @@ mod tests {
         assert!(!deserialized.is_navigable(1, 1, 1));
         assert!(deserialized.is_navigable(0, 0, 0));
         assert!((deserialized.cost(2, 2, 2) - 3.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn voxel_1x1x1() {
+        let vol = NavVolume::new(1, 1, 1, 1.0);
+        let path = vol.find_path(VoxelPos::new(0, 0, 0), VoxelPos::new(0, 0, 0));
+        assert_eq!(path, Some(vec![VoxelPos::new(0, 0, 0)]));
+    }
+
+    #[test]
+    fn voxel_cost_aware() {
+        let mut vol = NavVolume::new(10, 1, 10, 1.0);
+        // Make a wall of expensive cells at x=5, except leave z=0 cheap
+        for z in 1..10 {
+            vol.set_cost(5, 0, z, 1000.0);
+        }
+        // Path from (0,0,5) to (9,0,5) should go around via z=0
+        let path = vol.find_path(VoxelPos::new(0, 0, 5), VoxelPos::new(9, 0, 5));
+        assert!(path.is_some());
+        let path = path.unwrap();
+        // Cells at x=5 with z>0 should be avoided (only x=5,z=0 is cheap)
+        for p in &path {
+            if p.x == 5 {
+                assert!(
+                    p.z == 0,
+                    "Path should avoid expensive cells at x=5, z>0, but went through ({},{},{})",
+                    p.x,
+                    p.y,
+                    p.z
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn voxel_all_blocked() {
+        let mut vol = NavVolume::new(3, 3, 3, 1.0);
+        // Block everything except start and goal
+        for z in 0..3 {
+            for y in 0..3 {
+                for x in 0..3 {
+                    let is_start = x == 0 && y == 0 && z == 0;
+                    let is_goal = x == 2 && y == 2 && z == 2;
+                    if !is_start && !is_goal {
+                        vol.set_navigable(x, y, z, false);
+                    }
+                }
+            }
+        }
+        // No path possible (no connected neighbors)
+        assert!(
+            vol.find_path(VoxelPos::new(0, 0, 0), VoxelPos::new(2, 2, 2))
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn voxel_large_volume() {
+        let vol = NavVolume::new(20, 20, 20, 1.0);
+        let path = vol.find_path(VoxelPos::new(0, 0, 0), VoxelPos::new(19, 19, 19));
+        assert!(path.is_some());
+        let path = path.unwrap();
+        assert_eq!(*path.first().unwrap(), VoxelPos::new(0, 0, 0));
+        assert_eq!(*path.last().unwrap(), VoxelPos::new(19, 19, 19));
+    }
+
+    #[test]
+    fn voxel_cell_size_clamped() {
+        // cell_size should be clamped to positive
+        let vol = NavVolume::new(5, 5, 5, 0.0);
+        // Should not panic on coordinate conversion
+        let _pos = vol.world_to_voxel(Vec3::new(1.0, 1.0, 1.0));
     }
 }

@@ -120,6 +120,7 @@ impl OffMeshLinkRegistry {
 
     /// Remove a link by ID. Returns the removed link, or `None`.
     #[cfg_attr(feature = "logging", instrument(skip(self)))]
+    #[must_use]
     pub fn remove_link(&mut self, id: OffMeshLinkId) -> Option<OffMeshLink> {
         if let Some(pos) = self.links.iter().position(|l| l.id == id) {
             Some(self.links.swap_remove(pos))

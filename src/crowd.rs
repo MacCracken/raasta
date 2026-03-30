@@ -31,6 +31,7 @@ impl CrowdSimulation {
     /// - `max_density`: agents per cell before velocity damping kicks in
     #[must_use]
     pub fn new(time_horizon: f32, density_cell_size: f32, max_density: f32) -> Self {
+        let density_cell_size = density_cell_size.max(f32::EPSILON);
         Self {
             rvo: RvoSimulation::new(time_horizon),
             density_cell_size,
@@ -210,5 +211,43 @@ mod tests {
         // All agents should have moved generally toward their targets
         assert!(sim.agent(0).position.x > -10.0);
         assert!(sim.agent(5).position.y > -10.0);
+    }
+
+    #[test]
+    fn crowd_zero_agents() {
+        let mut sim = CrowdSimulation::new(2.0, 1.0, 5.0);
+        sim.step(0.1); // Should not panic
+        assert_eq!(sim.agent_count(), 0);
+    }
+
+    #[test]
+    fn crowd_cell_size_clamped() {
+        // density_cell_size = 0 should be clamped, not divide by zero
+        let mut sim = CrowdSimulation::new(2.0, 0.0, 5.0);
+        let idx = sim.add_agent(RvoAgent::new(Vec2::ZERO, 0.5, 2.0));
+        sim.set_preferred_velocity(idx, Vec2::new(1.0, 0.0));
+        sim.step(0.1); // Should not panic
+    }
+
+    #[test]
+    fn crowd_extreme_density() {
+        let mut sim = CrowdSimulation::new(2.0, 1.0, 5.0);
+        // Pack many agents into a small area
+        for i in 0..50 {
+            let x = (i % 5) as f32 * 0.1;
+            let y = (i / 5) as f32 * 0.1;
+            let idx = sim.add_agent(RvoAgent::new(Vec2::new(x, y), 0.1, 2.0));
+            sim.set_preferred_velocity(idx, Vec2::new(1.0, 0.0));
+        }
+        sim.step(0.016); // Should not panic
+        assert_eq!(sim.agent_count(), 50);
+    }
+
+    #[test]
+    fn crowd_zero_max_density() {
+        let mut sim = CrowdSimulation::new(2.0, 1.0, 0.0);
+        let idx = sim.add_agent(RvoAgent::new(Vec2::ZERO, 0.5, 2.0));
+        sim.set_preferred_velocity(idx, Vec2::new(1.0, 0.0));
+        sim.step(0.1); // Should handle gracefully
     }
 }

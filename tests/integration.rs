@@ -1,6 +1,8 @@
 //! Integration tests for raasta.
 
+use raasta::{DStarLite, Formation, FormationShape, PathCorridor};
 use raasta::{GridPos, NavGrid, NavMesh, NavPoly, NavPolyId, PathResult, PathStatus, Vec2};
+use raasta::{HeightfieldConfig, Vec3, bake_navmesh_from_geometry};
 use raasta::{SteerBehavior, compute_steer, funnel_smooth};
 
 #[test]
@@ -151,4 +153,105 @@ fn smooth_grid_path() {
     // Endpoints preserved
     assert_eq!(smoothed[0], world_path[0]);
     assert_eq!(*smoothed.last().unwrap(), *world_path.last().unwrap());
+}
+
+#[test]
+fn dstar_dynamic_navigation() {
+    let mut grid = NavGrid::new(20, 20, 1.0);
+    let mut ds = DStarLite::new(&grid, GridPos::new(0, 0), GridPos::new(19, 19)).unwrap();
+    ds.compute_path(&grid);
+
+    // Agent starts moving, obstacles appear
+    let initial_path = ds.path(&grid).unwrap();
+    assert!(!initial_path.is_empty());
+
+    // Block a corridor the agent was going to use
+    for y in 0..10 {
+        grid.set_walkable(10, y, false);
+        ds.update_cell(&grid, GridPos::new(10, y));
+    }
+    ds.compute_path(&grid);
+    let new_path = ds
+        .path(&grid)
+        .expect("should find alternative path around partial wall");
+    // New path should still reach the goal
+    assert_eq!(*new_path.last().unwrap(), GridPos::new(19, 19));
+}
+
+#[test]
+fn heightfield_to_navmesh_pipeline() {
+    let triangles = vec![
+        [
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(20.0, 0.0, 0.0),
+            Vec3::new(20.0, 0.0, 20.0),
+        ],
+        [
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(20.0, 0.0, 20.0),
+            Vec3::new(0.0, 0.0, 20.0),
+        ],
+    ];
+    let config = HeightfieldConfig {
+        cell_size: 1.0,
+        cell_height: 0.5,
+        agent_height: 2.0,
+        agent_radius: 0.0,
+        min_region_area: 1,
+        ..HeightfieldConfig::default()
+    };
+    let mesh = bake_navmesh_from_geometry(&triangles, &config);
+    assert!(mesh.poly_count() > 0);
+}
+
+#[test]
+fn formation_movement() {
+    let mut formation = Formation::new(FormationShape::Line { spacing: 2.0 });
+    formation.update_leader(Vec2::new(10.0, 10.0), Vec2::new(1.0, 0.0));
+
+    // Leader is at slot 0
+    let leader_pos = formation.slot_position(0);
+    assert!((leader_pos - Vec2::new(10.0, 10.0)).length() < 0.01);
+
+    // Followers get steering toward their slots
+    for i in 1..5 {
+        let _slot = formation.slot_position(i);
+        let steer = formation.steer_to_slot(Vec2::ZERO, i, 5.0);
+        assert!(steer.speed() > 0.0);
+    }
+}
+
+#[test]
+fn corridor_smooth_pipeline() {
+    let mut mesh = NavMesh::new();
+    mesh.add_poly(NavPoly {
+        id: NavPolyId(0),
+        vertices: vec![
+            Vec2::ZERO,
+            Vec2::new(10.0, 0.0),
+            Vec2::new(10.0, 10.0),
+            Vec2::new(0.0, 10.0),
+        ],
+        neighbors: vec![NavPolyId(1)],
+        cost: 1.0,
+        layer: 0,
+    });
+    mesh.add_poly(NavPoly {
+        id: NavPolyId(1),
+        vertices: vec![
+            Vec2::new(10.0, 0.0),
+            Vec2::new(20.0, 0.0),
+            Vec2::new(20.0, 10.0),
+            Vec2::new(10.0, 10.0),
+        ],
+        neighbors: vec![NavPolyId(0)],
+        cost: 1.0,
+        layer: 0,
+    });
+
+    let corridor = PathCorridor::find(&mesh, Vec2::new(5.0, 5.0), Vec2::new(15.0, 5.0));
+    assert!(corridor.is_some());
+    let c = corridor.unwrap();
+    let smooth = c.smooth_path(&mesh, 0.0);
+    assert!(smooth.len() >= 2);
 }

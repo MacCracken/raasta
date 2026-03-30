@@ -3147,4 +3147,58 @@ mod tests {
         // Small polygon should be removed by large erosion
         assert_eq!(eroded.poly_count(), 0);
     }
+
+    #[test]
+    fn navpoly_zero_area() {
+        // Collinear vertices — zero area polygon
+        let poly = NavPoly {
+            id: NavPolyId(0),
+            vertices: vec![Vec2::ZERO, Vec2::new(5.0, 0.0), Vec2::new(10.0, 0.0)],
+            neighbors: vec![],
+            cost: 1.0,
+            layer: 0,
+        };
+        // Collinear polygon: point off the line should not be contained
+        assert!(!poly.contains_point(Vec2::new(5.0, 1.0)));
+    }
+
+    #[test]
+    fn navpoly_single_vertex() {
+        let poly = NavPoly {
+            id: NavPolyId(0),
+            vertices: vec![Vec2::ZERO],
+            neighbors: vec![],
+            cost: 1.0,
+            layer: 0,
+        };
+        assert!(!poly.contains_point(Vec2::ZERO));
+    }
+
+    #[test]
+    fn navpoly_two_vertices() {
+        let poly = NavPoly {
+            id: NavPolyId(0),
+            vertices: vec![Vec2::ZERO, Vec2::new(10.0, 0.0)],
+            neighbors: vec![],
+            cost: 1.0,
+            layer: 0,
+        };
+        assert!(!poly.contains_point(Vec2::new(5.0, 0.0)));
+    }
+
+    #[test]
+    fn navmesh_invalid_neighbor_id() {
+        // Polygon references a non-existent neighbor — pathfinding should handle gracefully
+        let mut mesh = NavMesh::new();
+        mesh.add_poly(NavPoly {
+            id: NavPolyId(0),
+            vertices: vec![Vec2::ZERO, Vec2::new(10.0, 0.0), Vec2::new(5.0, 10.0)],
+            neighbors: vec![NavPolyId(99)], // doesn't exist
+            cost: 1.0,
+            layer: 0,
+        });
+        // Should not panic
+        let path = mesh.find_path(Vec2::new(5.0, 3.0), Vec2::new(5.0, 3.0));
+        assert!(path.is_some()); // same poly, path to self
+    }
 }

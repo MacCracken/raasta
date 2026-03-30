@@ -177,6 +177,7 @@ pub fn wander(
 ///
 /// Returns a force that pushes the agent away from neighbors within `radius`.
 /// Closer neighbors produce stronger repulsion.
+#[inline]
 #[must_use]
 pub fn separation(position: Vec2, neighbors: &[Vec2], radius: f32, max_force: f32) -> SteerOutput {
     let mut force = Vec2::ZERO;
@@ -204,6 +205,7 @@ pub fn separation(position: Vec2, neighbors: &[Vec2], radius: f32, max_force: f3
 }
 
 /// Compute alignment steering — steer toward the average heading of neighbors.
+#[inline]
 #[must_use]
 pub fn alignment(velocity: Vec2, neighbor_velocities: &[Vec2], max_force: f32) -> SteerOutput {
     if neighbor_velocities.is_empty() {
@@ -221,6 +223,7 @@ pub fn alignment(velocity: Vec2, neighbor_velocities: &[Vec2], max_force: f32) -
 }
 
 /// Compute cohesion steering — steer toward the center of mass of neighbors.
+#[inline]
 #[must_use]
 pub fn cohesion(position: Vec2, neighbors: &[Vec2], max_speed: f32) -> SteerOutput {
     if neighbors.is_empty() {

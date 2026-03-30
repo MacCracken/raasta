@@ -72,6 +72,8 @@ impl Heightfield {
     /// Create an empty heightfield covering the given world bounds.
     #[must_use]
     pub fn new(min: Vec3, max: Vec3, cell_size: f32, cell_height: f32) -> Self {
+        let cell_size = cell_size.max(f32::EPSILON);
+        let cell_height = cell_height.max(f32::EPSILON);
         let width = ((max.x - min.x) / cell_size).ceil() as usize;
         let depth = ((max.z - min.z) / cell_size).ceil() as usize;
         Self {
@@ -913,5 +915,79 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn heightfield_degenerate_triangle() {
+        // Zero-area triangle (collinear points)
+        let tris = vec![[
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(5.0, 0.0, 0.0),
+            Vec3::new(10.0, 0.0, 0.0), // collinear
+        ]];
+        let mut hf = Heightfield::new(
+            Vec3::new(-1.0, -1.0, -1.0),
+            Vec3::new(11.0, 1.0, 1.0),
+            1.0,
+            0.5,
+        );
+        hf.rasterize_triangles(&tris); // Should not panic
+    }
+
+    #[test]
+    fn heightfield_single_triangle() {
+        let tris = vec![[
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(5.0, 0.0, 0.0),
+            Vec3::new(2.5, 0.0, 5.0),
+        ]];
+        let config = HeightfieldConfig {
+            cell_size: 1.0,
+            cell_height: 0.5,
+            agent_height: 2.0,
+            agent_radius: 0.0,
+            min_region_area: 1,
+            ..HeightfieldConfig::default()
+        };
+        let mesh = bake_navmesh_from_geometry(&tris, &config);
+        // Should produce at least one polygon
+        assert!(mesh.poly_count() > 0);
+    }
+
+    #[test]
+    fn heightfield_cell_size_clamped() {
+        // cell_size = 0 should be clamped to EPSILON; use a tiny bounding box
+        // so the resulting grid is small
+        let hf = Heightfield::new(Vec3::ZERO, Vec3::new(0.001, 0.001, 0.001), 0.0, 0.0);
+        // Should not panic, dimensions should be positive
+        assert!(hf.width() > 0);
+        assert!(hf.depth() > 0);
+    }
+
+    #[test]
+    fn heightfield_overlapping_triangles() {
+        // Two triangles covering the same area
+        let tris = vec![
+            [
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(10.0, 0.0, 0.0),
+                Vec3::new(10.0, 0.0, 10.0),
+            ],
+            [
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(10.0, 0.0, 10.0),
+                Vec3::new(0.0, 0.0, 10.0),
+            ],
+        ];
+        let mut hf = Heightfield::new(
+            Vec3::new(-1.0, -1.0, -1.0),
+            Vec3::new(11.0, 1.0, 11.0),
+            1.0,
+            0.5,
+        );
+        hf.rasterize_triangles(&tris);
+        // Should handle overlapping spans by merging
+        let spans = hf.spans_at(5, 5);
+        assert!(!spans.is_empty());
     }
 }

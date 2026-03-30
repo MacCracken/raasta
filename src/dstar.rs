@@ -177,7 +177,10 @@ impl DStarLite {
         let mut iterations = 0u32;
         let max_iterations = (self.grid_width * self.grid_height * 4) as u32;
 
-        while let Some(top) = self.open.peek() {
+        loop {
+            let Some(top) = self.open.peek() else {
+                break;
+            };
             if early_terminate {
                 let top_key = top.key;
                 let start_key = calculate_key(
@@ -199,7 +202,9 @@ impl DStarLite {
                 break;
             }
 
-            let u = self.open.pop().expect("peek succeeded so pop must too");
+            let Some(u) = self.open.pop() else {
+                break;
+            };
             let u_idx = u.idx;
             let ux = (u_idx % self.grid_width) as i32;
             let uy = (u_idx / self.grid_width) as i32;
@@ -563,5 +568,130 @@ mod tests {
         ds.compute_path(&grid);
         let path = ds.path(&grid);
         assert!(path.is_some());
+    }
+
+    #[test]
+    fn dstar_sequential_updates() {
+        let mut grid = NavGrid::new(20, 20, 1.0);
+        let mut ds = DStarLite::new(&grid, GridPos::new(0, 0), GridPos::new(19, 19)).unwrap();
+        ds.compute_path(&grid);
+        assert!(ds.path(&grid).is_some());
+
+        // Block cells one at a time, replan each time
+        for i in 0..5 {
+            grid.set_walkable(10, i * 3, false);
+            ds.update_cell(&grid, GridPos::new(10, i * 3));
+            ds.compute_path(&grid);
+        }
+        let path = ds.path(&grid);
+        assert!(path.is_some());
+        // Path should avoid all blocked cells
+        let path = path.unwrap();
+        for i in 0..5 {
+            assert!(!path.contains(&GridPos::new(10, i * 3)));
+        }
+    }
+
+    #[test]
+    fn dstar_moving_start_along_path() {
+        let grid = NavGrid::new(20, 20, 1.0);
+        let mut ds = DStarLite::new(&grid, GridPos::new(0, 0), GridPos::new(19, 19)).unwrap();
+        ds.compute_path(&grid);
+
+        // Simulate agent moving along the path
+        ds.set_start(GridPos::new(5, 5));
+        ds.compute_path(&grid);
+        let path = ds.path(&grid).unwrap();
+        assert_eq!(*path.first().unwrap(), GridPos::new(5, 5));
+        assert_eq!(*path.last().unwrap(), GridPos::new(19, 19));
+    }
+
+    #[test]
+    fn dstar_highly_dynamic() {
+        let mut grid = NavGrid::new(20, 20, 1.0);
+        let mut ds = DStarLite::new(&grid, GridPos::new(0, 0), GridPos::new(19, 19)).unwrap();
+        ds.compute_path(&grid);
+
+        // Block and unblock many cells
+        for i in 0..10 {
+            grid.set_walkable(i * 2, 10, false);
+            ds.update_cell(&grid, GridPos::new(i * 2, 10));
+        }
+        ds.compute_path(&grid);
+        assert!(ds.path(&grid).is_some());
+
+        // Unblock them
+        for i in 0..10 {
+            grid.set_walkable(i * 2, 10, true);
+            ds.update_cell(&grid, GridPos::new(i * 2, 10));
+        }
+        ds.compute_path(&grid);
+        assert!(ds.path(&grid).is_some());
+    }
+
+    #[test]
+    fn dstar_cost_change() {
+        let mut grid = NavGrid::new(10, 10, 1.0);
+        let mut ds = DStarLite::new(&grid, GridPos::new(0, 0), GridPos::new(9, 9)).unwrap();
+        ds.compute_path(&grid);
+        let _path1 = ds.path(&grid).unwrap();
+
+        // Make center cells expensive
+        for y in 3..7 {
+            for x in 3..7 {
+                grid.set_cost(x, y, 100.0);
+                ds.update_cell(&grid, GridPos::new(x, y));
+            }
+        }
+        ds.compute_path(&grid);
+        let path2 = ds.path(&grid).unwrap();
+        // Path should change to avoid expensive area (or at least still be valid)
+        assert!(!path2.is_empty());
+        assert_eq!(*path2.last().unwrap(), GridPos::new(9, 9));
+    }
+
+    #[test]
+    fn dstar_large_grid() {
+        let grid = NavGrid::new(100, 100, 1.0);
+        let mut ds = DStarLite::new(&grid, GridPos::new(0, 0), GridPos::new(99, 99)).unwrap();
+        ds.compute_path(&grid);
+        let path = ds.path(&grid);
+        assert!(path.is_some());
+    }
+
+    #[test]
+    fn dstar_complete_wall_off() {
+        let mut grid = NavGrid::new(10, 10, 1.0);
+        let mut ds = DStarLite::new(&grid, GridPos::new(0, 0), GridPos::new(9, 9)).unwrap();
+        ds.compute_path(&grid);
+        assert!(ds.path(&grid).is_some());
+
+        // Wall off completely
+        for y in 0..10 {
+            grid.set_walkable(5, y, false);
+            ds.update_cell(&grid, GridPos::new(5, y));
+        }
+        ds.compute_path(&grid);
+        assert!(ds.path(&grid).is_none());
+    }
+
+    #[test]
+    fn dstar_unwalkable_start_no_path() {
+        let mut grid = NavGrid::new(10, 10, 1.0);
+        grid.set_walkable(0, 0, false);
+        let mut ds = DStarLite::new(&grid, GridPos::new(0, 0), GridPos::new(9, 9)).unwrap();
+        ds.compute_path(&grid);
+        // Start is unwalkable, so no path should be found
+        assert!(ds.path(&grid).is_none());
+    }
+
+    #[test]
+    fn dstar_unwalkable_goal_no_path() {
+        let mut grid = NavGrid::new(10, 10, 1.0);
+        grid.set_walkable(9, 9, false);
+        let mut ds = DStarLite::new(&grid, GridPos::new(0, 0), GridPos::new(9, 9)).unwrap();
+        ds.compute_path(&grid);
+        // Goal is unwalkable, so no path should be found
+        assert!(ds.path(&grid).is_none());
     }
 }

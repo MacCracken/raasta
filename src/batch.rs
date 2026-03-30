@@ -219,6 +219,7 @@ impl PathBatcher {
     ///
     /// Returns a list of completed results from this frame.
     #[cfg_attr(feature = "logging", instrument(skip(self, grid)))]
+    #[must_use]
     pub fn process(&mut self, grid: &NavGrid, max_iterations: u32) -> Vec<BatchedResult> {
         // Promote queued requests to active
         self.promote_queued(grid);
@@ -503,7 +504,7 @@ mod tests {
         }
 
         // After first process, should have at most 2 active
-        batcher.process(&grid, 1);
+        let _ = batcher.process(&grid, 1);
         assert!(batcher.active_count() <= 2);
     }
 
