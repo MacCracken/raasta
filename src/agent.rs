@@ -1,8 +1,5 @@
 //! Agent — ties position, velocity, path following, and steering together.
 
-#[cfg(feature = "logging")]
-use tracing::instrument;
-
 use hisab::Vec2;
 use serde::{Deserialize, Serialize};
 

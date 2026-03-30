@@ -4,8 +4,6 @@
 //! consume directly for debug rendering, plus conversion functions from raasta
 //! core types.
 
-#[cfg(feature = "logging")]
-use tracing::instrument;
 use serde::{Deserialize, Serialize};
 
 use crate::crowd::CrowdSimulation;

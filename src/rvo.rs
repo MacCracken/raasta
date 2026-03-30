@@ -3,6 +3,8 @@
 //! Implements the ORCA (Optimal Reciprocal Collision Avoidance) algorithm
 //! for multi-agent local avoidance.
 
+use std::collections::HashMap;
+
 use hisab::Vec2;
 use serde::{Deserialize, Serialize};
 
@@ -245,23 +247,110 @@ fn solve_on_line(line: &HalfPlane, constraints: &[HalfPlane], max_speed: f32) ->
     line.point + direction * t
 }
 
+/// Spatial hash grid for efficient neighbor queries.
+///
+/// Maps 2D positions to grid cells so that nearby agents can be found in O(1)
+/// per cell rather than scanning all agents.
+#[derive(Debug, Clone)]
+struct SpatialHash {
+    inv_cell_size: f32,
+    cells: HashMap<(i32, i32), Vec<usize>>,
+}
+
+impl SpatialHash {
+    #[must_use]
+    fn new(cell_size: f32) -> Self {
+        Self {
+            inv_cell_size: 1.0 / cell_size,
+            cells: HashMap::new(),
+        }
+    }
+
+    /// Clear all cell contents without deallocating.
+    fn clear(&mut self) {
+        for v in self.cells.values_mut() {
+            v.clear();
+        }
+    }
+
+    #[inline]
+    #[must_use]
+    fn cell_key(&self, pos: Vec2) -> (i32, i32) {
+        (
+            (pos.x * self.inv_cell_size).floor() as i32,
+            (pos.y * self.inv_cell_size).floor() as i32,
+        )
+    }
+
+    #[inline]
+    fn insert(&mut self, idx: usize, pos: Vec2) {
+        let key = self.cell_key(pos);
+        self.cells.entry(key).or_default().push(idx);
+    }
+
+    /// Query all agent indices in cells overlapping the given position +/- radius.
+    #[inline]
+    fn query_neighbors(&self, pos: Vec2, radius: f32, result: &mut Vec<usize>) {
+        let min_x = ((pos.x - radius) * self.inv_cell_size).floor() as i32;
+        let max_x = ((pos.x + radius) * self.inv_cell_size).floor() as i32;
+        let min_y = ((pos.y - radius) * self.inv_cell_size).floor() as i32;
+        let max_y = ((pos.y + radius) * self.inv_cell_size).floor() as i32;
+
+        for cy in min_y..=max_y {
+            for cx in min_x..=max_x {
+                if let Some(cell) = self.cells.get(&(cx, cy)) {
+                    result.extend_from_slice(cell);
+                }
+            }
+        }
+    }
+}
+
 /// Multi-agent RVO simulation.
 ///
 /// Manages a set of agents and computes collision-free velocities each tick.
+/// Uses a spatial hash grid for efficient neighbor queries, reducing the
+/// constraint computation from O(n^2) to O(n*k) where k is the average
+/// number of nearby agents.
 #[derive(Debug, Clone)]
 pub struct RvoSimulation {
     agents: Vec<RvoAgent>,
     time_horizon: f32,
+    neighbor_dist: f32,
+    spatial_hash: SpatialHash,
 }
 
 impl RvoSimulation {
     /// Create a new simulation with the given time horizon.
+    ///
+    /// Uses a default neighbor distance of `time_horizon * 20.0`, which is
+    /// generous enough for most scenarios. For tighter control, use
+    /// [`with_neighbor_dist`](Self::with_neighbor_dist).
     #[cfg_attr(feature = "logging", instrument)]
     #[must_use]
     pub fn new(time_horizon: f32) -> Self {
+        let neighbor_dist = time_horizon * 20.0;
         Self {
             agents: Vec::new(),
             time_horizon,
+            neighbor_dist,
+            spatial_hash: SpatialHash::new(neighbor_dist),
+        }
+    }
+
+    /// Create a new simulation with custom neighbor distance for spatial hashing.
+    ///
+    /// `neighbor_dist` is the maximum distance at which agents interact.
+    /// Agents further apart than this are skipped during constraint computation.
+    /// A good default is `max_agent_speed * time_horizon * 2.0`.
+    #[cfg_attr(feature = "logging", instrument)]
+    #[must_use]
+    pub fn with_neighbor_dist(time_horizon: f32, neighbor_dist: f32) -> Self {
+        Self {
+            agents: Vec::new(),
+            time_horizon,
+            neighbor_dist,
+            spatial_hash: SpatialHash::new(neighbor_dist),
         }
     }
 
@@ -301,21 +390,46 @@ impl RvoSimulation {
 
     /// Step the simulation by `dt` seconds.
     ///
-    /// Computes ORCA constraints for all agent pairs, solves for safe
-    /// velocities, and updates positions.
+    /// Rebuilds the spatial hash, computes ORCA constraints for nearby agent
+    /// pairs, solves for safe velocities, and updates positions.
     #[cfg_attr(feature = "logging", instrument(skip(self), fields(agents = self.agents.len())))]
     pub fn step(&mut self, dt: f32) {
         let n = self.agents.len();
         let mut new_velocities = vec![Vec2::ZERO; n];
 
+        // Rebuild spatial hash
+        self.spatial_hash.clear();
+        for (i, agent) in self.agents.iter().enumerate() {
+            self.spatial_hash.insert(i, agent.position);
+        }
+
+        let neighbor_dist_sq = self.neighbor_dist * self.neighbor_dist;
+        let mut neighbor_indices = Vec::new();
+
         #[allow(clippy::needless_range_loop)]
         for i in 0..n {
             let mut constraints = Vec::new();
 
-            for j in 0..n {
+            // Query nearby agents via spatial hash
+            neighbor_indices.clear();
+            self.spatial_hash.query_neighbors(
+                self.agents[i].position,
+                self.neighbor_dist,
+                &mut neighbor_indices,
+            );
+
+            for &j in &neighbor_indices {
                 if i == j {
                     continue;
                 }
+                // Distance check for circular accuracy (spatial hash returns a square region)
+                let dist_sq = self.agents[i]
+                    .position
+                    .distance_squared(self.agents[j].position);
+                if dist_sq > neighbor_dist_sq {
+                    continue;
+                }
+
                 let hp =
                     compute_orca_half_plane(&self.agents[i], &self.agents[j], self.time_horizon);
                 constraints.push(hp);
@@ -631,5 +745,87 @@ mod tests {
         let deserialized: HalfPlane = serde_json::from_str(&json).unwrap();
         assert!((deserialized.point - hp.point).length() < f32::EPSILON);
         assert!((deserialized.normal - hp.normal).length() < f32::EPSILON);
+    }
+
+    // --- Spatial hash tests ---
+
+    #[test]
+    fn spatial_hash_basic() {
+        let mut sh = SpatialHash::new(10.0);
+        sh.insert(0, Vec2::new(5.0, 5.0));
+        sh.insert(1, Vec2::new(15.0, 5.0));
+        sh.insert(2, Vec2::new(100.0, 100.0));
+
+        let mut results = Vec::new();
+        sh.query_neighbors(Vec2::new(5.0, 5.0), 12.0, &mut results);
+        assert!(results.contains(&0));
+        assert!(results.contains(&1));
+        assert!(!results.contains(&2));
+    }
+
+    #[test]
+    fn spatial_hash_clear_reuse() {
+        let mut sh = SpatialHash::new(10.0);
+        sh.insert(0, Vec2::new(5.0, 5.0));
+        sh.clear();
+
+        let mut results = Vec::new();
+        sh.query_neighbors(Vec2::new(5.0, 5.0), 12.0, &mut results);
+        assert!(results.is_empty());
+
+        // Re-insert after clear should work
+        sh.insert(1, Vec2::new(5.0, 5.0));
+        sh.query_neighbors(Vec2::new(5.0, 5.0), 12.0, &mut results);
+        assert!(results.contains(&1));
+    }
+
+    #[test]
+    fn spatial_hash_negative_coords() {
+        let mut sh = SpatialHash::new(10.0);
+        sh.insert(0, Vec2::new(-15.0, -15.0));
+        sh.insert(1, Vec2::new(-5.0, -5.0));
+
+        let mut results = Vec::new();
+        sh.query_neighbors(Vec2::new(-10.0, -10.0), 12.0, &mut results);
+        assert!(results.contains(&0));
+        assert!(results.contains(&1));
+    }
+
+    #[test]
+    fn rvo_with_spatial_hash() {
+        let mut sim = RvoSimulation::with_neighbor_dist(2.0, 10.0);
+        // Two agents heading toward each other
+        let a = RvoAgent::new(Vec2::ZERO, 0.5, 2.0);
+        let b = RvoAgent::new(Vec2::new(4.0, 0.0), 0.5, 2.0);
+        sim.add_agent(a);
+        sim.add_agent(b);
+        sim.set_preferred_velocity(0, Vec2::new(1.0, 0.0));
+        sim.set_preferred_velocity(1, Vec2::new(-1.0, 0.0));
+
+        for _ in 0..20 {
+            sim.step(0.1);
+        }
+        // Agents should have avoided each other
+        let dist = sim.agent(0).position.distance(sim.agent(1).position);
+        assert!(dist >= 0.9, "agents too close: {dist}");
+    }
+
+    #[test]
+    fn rvo_far_agents_ignored() {
+        let mut sim = RvoSimulation::with_neighbor_dist(2.0, 5.0);
+        let a = RvoAgent::new(Vec2::ZERO, 0.5, 2.0);
+        let b = RvoAgent::new(Vec2::new(100.0, 0.0), 0.5, 2.0);
+        sim.add_agent(a);
+        sim.add_agent(b);
+        sim.set_preferred_velocity(0, Vec2::new(1.0, 0.0));
+        sim.set_preferred_velocity(1, Vec2::new(-1.0, 0.0));
+
+        sim.step(0.1);
+        // Agent 0 should move at full preferred velocity (no constraints from far agent)
+        assert!(
+            (sim.agent(0).velocity.x - 1.0).abs() < 0.01,
+            "expected ~1.0, got {}",
+            sim.agent(0).velocity.x
+        );
     }
 }

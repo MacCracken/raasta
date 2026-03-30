@@ -90,6 +90,7 @@ fn bench_navmesh_path_10_polys(c: &mut Criterion) {
                 Vec2::new(x, 2.0),
             ],
             neighbors,
+            cost: 1.0,
         });
     }
     c.bench_function("navmesh_path_10_polys", |b| {
@@ -163,6 +164,7 @@ fn make_linear_mesh(n: u32) -> NavMesh {
                 Vec2::new(x, 2.0),
             ],
             neighbors,
+            cost: 1.0,
         });
     }
     mesh

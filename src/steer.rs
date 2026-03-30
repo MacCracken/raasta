@@ -1,8 +1,5 @@
 //! Steering behaviors — seek, flee, arrive, obstacle avoidance.
 
-#[cfg(feature = "logging")]
-use tracing::instrument;
-
 use hisab::Vec2;
 use serde::{Deserialize, Serialize};
 

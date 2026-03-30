@@ -9,6 +9,8 @@ use serde::{Deserialize, Serialize};
 pub enum PathStatus {
     /// Path found successfully.
     Found,
+    /// Path could not reach the goal; this is the closest reachable point.
+    Partial,
     /// No path exists between start and goal.
     NotFound,
     /// Start or goal is outside navigable area.
@@ -55,6 +57,17 @@ impl PathResult {
         }
     }
 
+    /// Create a partial path result (closest reachable point to unreachable goal).
+    #[must_use]
+    pub fn partial(waypoints: Vec<Vec2>) -> Self {
+        let length = waypoints.windows(2).map(|w| (w[1] - w[0]).length()).sum();
+        Self {
+            status: PathStatus::Partial,
+            waypoints,
+            length,
+        }
+    }
+
     /// Create a not-found result.
     #[must_use]
     pub fn not_found() -> Self {
@@ -80,6 +93,12 @@ impl PathResult {
     pub fn is_found(&self) -> bool {
         self.status == PathStatus::Found
     }
+
+    /// Whether the path is partial (closest reachable point to unreachable goal).
+    #[must_use]
+    pub fn is_partial(&self) -> bool {
+        self.status == PathStatus::Partial
+    }
 }
 
 #[cfg(test)]
@@ -90,6 +109,14 @@ mod tests {
     fn path_result_found() {
         let r = PathResult::found(vec![Vec2::ZERO, Vec2::new(3.0, 4.0)]);
         assert!(r.is_found());
+        assert!((r.length - 5.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn path_result_partial() {
+        let r = PathResult::partial(vec![Vec2::ZERO, Vec2::new(3.0, 4.0)]);
+        assert!(r.is_partial());
+        assert!(!r.is_found());
         assert!((r.length - 5.0).abs() < 0.01);
     }
 

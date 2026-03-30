@@ -4,11 +4,21 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
-## [0.27.0]
+## [1.0.0] — 2026-03-29
 
 ### Added
+- **partial path** — `NavGrid::find_path_partial()` and `NavMesh::find_path_partial()` return path to closest reachable point when goal is unreachable; `PathStatus::Partial` variant and `PathResult::partial()` constructor
+- **area costs** — `NavPoly.cost` field for per-polygon traversal cost; `AreaCostMultiplier` for per-agent cost overrides; `NavMesh::find_path_with_costs()` with combined polygon + agent multipliers
+- **spatial hashing** — `RvoSimulation::step()` now uses spatial hash grid for neighbor queries (O(n²) → O(n·k)); `RvoSimulation::with_neighbor_dist()` for custom interaction radius
+- **behavior blending** — `blend_weighted()` for weighted steering combination; `blend_priority()` for priority-based selection with fallback; `WeightedSteer` and `PrioritizedSteer` types
+- **off-mesh links** — `OffMeshLinkRegistry` for managing jump/ladder/teleport/door links; `NavMesh::find_path_with_links()` integrates links as A* edges; enable/disable support for dynamic doors
+- **funnel (SSFA)** — `funnel_portals()` proper Simple Stupid Funnel Algorithm on portal edges with agent radius shrinking; `extract_portals()` extracts shared edges from polygon paths; `Portal` type
+- **path corridor** — `PathCorridor` sliding window over navmesh polygon paths; `move_position()`, `trim_passed()`, `replan()`, `replan_local()` for local replanning; `smooth_path()` integration with funnel algorithm
+- **incremental pathfinding** — `IncrementalGridPath` time-sliced A* with per-frame iteration budget; `step()` returns `IncrementalStatus` for cooperative scheduling
+- **request batching** — `PathBatcher` queues path requests with `RequestPriority`; processes within per-frame budget using incremental A*; `max_active` concurrent query limit
 - **bridge** — cross-crate primitive-value bridges returning raasta types: impetus (collider → `Obstacle`, velocity 3D → `Vec2`), jantu (group target → `Vec2` destination, flee point → `(Vec2, f32)` repulsion), pavan (wind → movement cost, slope → speed scale)
 - **integration/soorat** — feature-gated `soorat-compat` module with visualization data structures and conversion functions: `NavMeshWireframe::from_navmesh()`, `PathVisualization::from_path_result()`, `FlowFieldVisualization::from_flow_field()`, `CrowdVisualization::from_crowd()`, `HpaOverlay::from_clusters()`
+- **tests** — 70+ new tests covering all P3 Tier 1 features (345 unit + 6 integration + 1 doc = 352 total)
 
 ### Fixed
 - **bridge** — `wind_to_movement_cost` had inverted physics: tailwind was increasing cost instead of decreasing it. Sign of dot-product contribution corrected; wind-speed normalization removed so 10 m/s headwind properly yields 2× cost

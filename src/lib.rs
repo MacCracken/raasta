@@ -28,18 +28,23 @@
 //! ```
 
 mod agent;
+mod batch;
+mod blend;
 /// Cross-crate bridges — primitive-value conversions from other AGNOS science crates.
 pub mod bridge;
+mod corridor;
 mod crowd;
-mod error;
 mod debug_draw;
+mod error;
 mod follow;
 mod grid;
 mod hpa;
+mod incremental;
 /// Integration APIs for downstream consumers (soorat rendering).
 pub mod integration;
 mod mesh;
 mod mesh3d;
+mod offmesh;
 mod path;
 mod rvo;
 mod smooth;
@@ -54,17 +59,22 @@ pub mod logging;
 pub use hisab::{Vec2, Vec3};
 
 pub use agent::Agent;
-pub use error::NavError;
+pub use batch::{BatchedResult, PathBatcher, PathRequestId, QueuedRequest, RequestPriority};
+pub use blend::{PrioritizedSteer, WeightedSteer, blend_priority, blend_weighted};
+pub use corridor::PathCorridor;
 pub use crowd::CrowdSimulation;
 pub use debug_draw::{DebugDraw, DebugLine, DebugPoint};
+pub use error::NavError;
 pub use follow::PathFollower;
 pub use grid::{GridPos, NavGrid};
 pub use hpa::{AbstractGraph, AbstractNodeId, ClusterId, Entrance, GridClusters};
-pub use mesh::{NavMesh, NavPoly, NavPolyId};
+pub use incremental::{IncrementalGridPath, IncrementalStatus};
+pub use mesh::{AreaCostMultiplier, NavMesh, NavPoly, NavPolyId};
 pub use mesh3d::{NavMesh3D, NavPoly3D};
+pub use offmesh::{LinkType, OffMeshLink, OffMeshLinkDesc, OffMeshLinkId, OffMeshLinkRegistry};
 pub use path::{PathRequest, PathResult, PathStatus};
 pub use rvo::{HalfPlane, RvoAgent, RvoSimulation, compute_orca_half_plane, solve_velocity};
-pub use smooth::funnel_smooth;
+pub use smooth::{Portal, extract_portals, funnel_portals, funnel_smooth};
 pub use steer::{
     Obstacle, SteerBehavior, SteerOutput, alignment, avoid_obstacles, cohesion, compute_steer,
     evade, pursuit, separation, wander,

@@ -36,18 +36,18 @@
 - [x] **Navigation queries** — closest point, raycast, nearest walkable
 - [x] **Debug visualization** — geometry output for navmesh, paths, flow fields
 
-## P3 — Future (from gap analysis + external research)
+## P3 — Advanced II (from gap analysis + external research)
 
-### Tier 1 — High Impact (production-critical)
-- [ ] Partial path return — when destination unreachable, return path to closest reachable point
-- [ ] Path corridor — sliding window with local replanning on world changes
-- [ ] Off-mesh links — jumps, ladders, teleporters, doors (custom traversal edges)
-- [ ] NavMesh area costs — per-polygon traversal cost with per-agent multipliers
-- [ ] Async / incremental pathfinding — time-sliced A* with per-frame budget
-- [ ] Path request batching + priority queue — cap per-frame pathfinding cost
-- [ ] Spatial hashing for RVO neighbor queries (O(n²) → O(n·k))
-- [ ] Behavior blending / priority system for combining multiple steerings
-- [ ] Proper funnel algorithm on portal edges (SSFA) with agent radius
+### Tier 1 — High Impact (production-critical) ✅
+- [x] Partial path return — when destination unreachable, return path to closest reachable point
+- [x] Path corridor — sliding window with local replanning on world changes
+- [x] Off-mesh links — jumps, ladders, teleporters, doors (custom traversal edges)
+- [x] NavMesh area costs — per-polygon traversal cost with per-agent multipliers
+- [x] Async / incremental pathfinding — time-sliced A* with per-frame budget
+- [x] Path request batching + priority queue — cap per-frame pathfinding cost
+- [x] Spatial hashing for RVO neighbor queries (O(n²) → O(n·k))
+- [x] Behavior blending / priority system for combining multiple steerings
+- [x] Proper funnel algorithm on portal edges (SSFA) with agent radius
 
 ### Tier 2 — Expected by serious consumers
 - [ ] Tiled navmesh — streaming, localized re-baking for open worlds

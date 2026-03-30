@@ -17,6 +17,8 @@ pub struct NavPoly3D {
     pub id: NavPolyId,
     pub vertices: Vec<Vec3>,
     pub neighbors: Vec<NavPolyId>,
+    /// Traversal cost multiplier (1.0 = normal, higher = more expensive).
+    pub cost: f32,
 }
 
 impl NavPoly3D {
@@ -188,7 +190,7 @@ impl NavMesh3D {
                 }
                 let neighbor = self.get_poly(neighbor_id)?;
                 let neighbor_centroid = neighbor.centroid();
-                let edge_cost = current_centroid.distance(neighbor_centroid);
+                let edge_cost = current_centroid.distance(neighbor_centroid) * neighbor.cost;
                 let tentative_g = current_g + edge_cost;
 
                 if tentative_g < g_score[ni] {
@@ -273,6 +275,7 @@ mod tests {
                 Vec3::new(0.0, 0.0, 2.0),
             ],
             neighbors: vec![NavPolyId(1)],
+            cost: 1.0,
         });
         mesh.add_poly(NavPoly3D {
             id: NavPolyId(1),
@@ -283,6 +286,7 @@ mod tests {
                 Vec3::new(2.0, 0.0, 2.0),
             ],
             neighbors: vec![NavPolyId(0)],
+            cost: 1.0,
         });
         mesh
     }
@@ -298,6 +302,7 @@ mod tests {
                 Vec3::new(0.0, 2.0, 0.0),
             ],
             neighbors: vec![],
+            cost: 1.0,
         };
         let c = poly.centroid();
         assert!((c.x - 1.0).abs() < f32::EPSILON);
@@ -314,6 +319,7 @@ mod tests {
                 Vec3::new(0.0, 0.0, 1.0),
             ],
             neighbors: vec![],
+            cost: 1.0,
         };
         let n = poly.normal();
         // For XZ plane triangle, normal should point in +Y or -Y
@@ -331,6 +337,7 @@ mod tests {
                 Vec3::new(0.0, 0.0, 4.0),
             ],
             neighbors: vec![],
+            cost: 1.0,
         };
         assert!(poly.contains_point_projected(Vec3::new(2.0, 0.0, 2.0)));
         assert!(!poly.contains_point_projected(Vec3::new(5.0, 0.0, 5.0)));

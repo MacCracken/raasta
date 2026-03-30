@@ -3,9 +3,6 @@
 //! Produces line segments and points that consumers can render with their
 //! own graphics backend. No rendering dependency.
 
-#[cfg(feature = "logging")]
-use tracing::instrument;
-
 use hisab::Vec2;
 use serde::{Deserialize, Serialize};
 
@@ -157,6 +154,7 @@ mod tests {
             id: NavPolyId(0),
             vertices: vec![Vec2::ZERO, Vec2::new(1.0, 0.0), Vec2::new(0.5, 1.0)],
             neighbors: vec![],
+            cost: 1.0,
         });
 
         let mut dd = DebugDraw::new();

@@ -7,8 +7,8 @@
 - **Type**: Flat library crate
 - **License**: GPL-3.0-only
 - **MSRV**: 1.89
-- **Version**: SemVer 0.26.3
-- **Tests**: 275 (268 unit + 6 integration + 1 doc)
+- **Version**: SemVer 1.0.0
+- **Tests**: 352 (345 unit + 6 integration + 1 doc)
 
 ## Consumers
 

@@ -330,6 +330,101 @@ impl NavGrid {
         None
     }
 
+    /// Find a path from `start` to `goal`, returning a partial path to the
+    /// closest reachable point if the goal is unreachable.
+    ///
+    /// Returns `None` only if the start is not walkable.
+    #[cfg_attr(feature = "logging", instrument(skip(self), fields(w = self.width, h = self.height)))]
+    #[must_use]
+    pub fn find_path_partial(&self, start: GridPos, goal: GridPos) -> Option<Vec<GridPos>> {
+        if !self.is_walkable(start.x, start.y) {
+            return None;
+        }
+        if start == goal {
+            return Some(vec![start]);
+        }
+        // If goal is walkable, try the normal path first
+        if self.is_walkable(goal.x, goal.y)
+            && let Some(path) = self.find_path(start, goal)
+        {
+            return Some(path);
+        }
+
+        // Run A* from start, tracking the explored node closest to goal
+        let len = self.width * self.height;
+        let mut g_score = vec![f32::INFINITY; len];
+        let mut came_from: Vec<Option<usize>> = vec![None; len];
+        let mut closed = vec![false; len];
+        let mut open = BinaryHeap::new();
+
+        let start_idx = self.index(start.x, start.y)?;
+
+        g_score[start_idx] = 0.0;
+        let h = if self.allow_diagonal {
+            start.octile_distance(goal)
+        } else {
+            start.manhattan_distance(goal) as f32
+        };
+        open.push(AStarNode {
+            idx: start_idx,
+            f_score: h,
+        });
+
+        let mut best_idx = start_idx;
+        let mut best_h = h;
+
+        let mut neighbors_buf = [(0i32, 0i32, 0.0f32); 8];
+
+        while let Some(current) = open.pop() {
+            if closed[current.idx] {
+                continue;
+            }
+            closed[current.idx] = true;
+
+            // Track the node closest to goal by heuristic
+            let cx = (current.idx % self.width) as i32;
+            let cy = (current.idx / self.width) as i32;
+            let current_pos = GridPos::new(cx, cy);
+            let current_h = if self.allow_diagonal {
+                current_pos.octile_distance(goal)
+            } else {
+                current_pos.manhattan_distance(goal) as f32
+            };
+            if current_h < best_h {
+                best_h = current_h;
+                best_idx = current.idx;
+            }
+
+            let count = self.neighbors_into(cx, cy, &mut neighbors_buf);
+
+            for &(nx, ny, move_cost) in &neighbors_buf[..count] {
+                let n_idx = self.index_unchecked(nx, ny);
+                if closed[n_idx] {
+                    continue;
+                }
+                let tentative_g = g_score[current.idx] + move_cost * self.costs[n_idx];
+
+                if tentative_g < g_score[n_idx] {
+                    came_from[n_idx] = Some(current.idx);
+                    g_score[n_idx] = tentative_g;
+                    let np = GridPos::new(nx, ny);
+                    let h = if self.allow_diagonal {
+                        np.octile_distance(goal)
+                    } else {
+                        np.manhattan_distance(goal) as f32
+                    };
+                    open.push(AStarNode {
+                        idx: n_idx,
+                        f_score: tentative_g + h,
+                    });
+                }
+            }
+        }
+
+        // Reconstruct path to the closest explored node
+        Some(self.reconstruct_path(&came_from, best_idx))
+    }
+
     /// Find a path using Jump Point Search (JPS).
     ///
     /// JPS is significantly faster than A* on uniform-cost grids with diagonal
@@ -1698,5 +1793,51 @@ mod tests {
                 assert!(dx <= 1 && dy <= 1 && (dx + dy) > 0);
             }
         }
+    }
+
+    #[test]
+    fn partial_path_blocked_goal() {
+        let mut grid = NavGrid::new(10, 10, 1.0);
+        grid.set_walkable(9, 9, false);
+        let path = grid.find_path_partial(GridPos::new(0, 0), GridPos::new(9, 9));
+        assert!(path.is_some());
+        let path = path.unwrap();
+        // Should reach a cell near (9,9)
+        let last = path.last().unwrap();
+        let dist = last.octile_distance(GridPos::new(9, 9));
+        assert!(dist < 3.0);
+    }
+
+    #[test]
+    fn partial_path_unreachable_island() {
+        let mut grid = NavGrid::new(10, 10, 1.0);
+        // Wall off the right side completely
+        for y in 0..10 {
+            grid.set_walkable(5, y, false);
+        }
+        let path = grid.find_path_partial(GridPos::new(0, 0), GridPos::new(9, 9));
+        assert!(path.is_some());
+        let path = path.unwrap();
+        let last = path.last().unwrap();
+        // Should end near x=4 (closest reachable to goal)
+        assert!(last.x <= 4);
+    }
+
+    #[test]
+    fn partial_path_reachable_returns_full() {
+        let grid = NavGrid::new(10, 10, 1.0);
+        let partial = grid.find_path_partial(GridPos::new(0, 0), GridPos::new(9, 9));
+        let full = grid.find_path(GridPos::new(0, 0), GridPos::new(9, 9));
+        assert_eq!(partial, full);
+    }
+
+    #[test]
+    fn partial_path_unwalkable_start() {
+        let mut grid = NavGrid::new(10, 10, 1.0);
+        grid.set_walkable(0, 0, false);
+        assert!(
+            grid.find_path_partial(GridPos::new(0, 0), GridPos::new(9, 9))
+                .is_none()
+        );
     }
 }

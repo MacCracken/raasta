@@ -7,10 +7,7 @@ use core::fmt;
 #[non_exhaustive]
 pub enum NavError {
     /// Grid dimensions overflow `usize`.
-    GridOverflow {
-        width: usize,
-        height: usize,
-    },
+    GridOverflow { width: usize, height: usize },
     /// An empty mesh was provided where at least one polygon is required.
     EmptyMesh,
 }
