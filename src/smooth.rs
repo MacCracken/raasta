@@ -491,6 +491,7 @@ mod tests {
             vertices: vec![Vec2::ZERO, Vec2::new(10.0, 0.0), Vec2::new(5.0, 10.0)],
             neighbors: vec![],
             cost: 1.0,
+            layer: 0,
         });
 
         let portals = extract_portals(

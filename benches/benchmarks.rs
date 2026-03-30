@@ -91,6 +91,7 @@ fn bench_navmesh_path_10_polys(c: &mut Criterion) {
             ],
             neighbors,
             cost: 1.0,
+            layer: 0,
         });
     }
     c.bench_function("navmesh_path_10_polys", |b| {
@@ -165,6 +166,7 @@ fn make_linear_mesh(n: u32) -> NavMesh {
             ],
             neighbors,
             cost: 1.0,
+            layer: 0,
         });
     }
     mesh

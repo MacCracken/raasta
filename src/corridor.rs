@@ -237,6 +237,7 @@ mod tests {
             ],
             neighbors: vec![NavPolyId(1)],
             cost: 1.0,
+            layer: 0,
         });
         mesh.add_poly(NavPoly {
             id: NavPolyId(1),
@@ -248,6 +249,7 @@ mod tests {
             ],
             neighbors: vec![NavPolyId(0), NavPolyId(2)],
             cost: 1.0,
+            layer: 0,
         });
         mesh.add_poly(NavPoly {
             id: NavPolyId(2),
@@ -259,6 +261,7 @@ mod tests {
             ],
             neighbors: vec![NavPolyId(1)],
             cost: 1.0,
+            layer: 0,
         });
         mesh
     }

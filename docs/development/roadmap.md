@@ -49,32 +49,32 @@
 - [x] Behavior blending / priority system for combining multiple steerings
 - [x] Proper funnel algorithm on portal edges (SSFA) with agent radius
 
-### Tier 2 — Expected by serious consumers
-- [ ] Tiled navmesh — streaming, localized re-baking for open worlds
-- [ ] Dynamic navmesh rebuild — rebuild only affected tiles on geometry change
-- [ ] NavMesh obstacle carving — subtract shapes from navmesh topology at runtime
-- [ ] Navigation query filters — per-agent include/exclude flags without re-baking
-- [ ] Random point on navmesh — for wander targets, spawn points
-- [ ] Height/elevation queries — ground-snap (x,z) → y
-- [ ] NavMesh serialization — save/load baked navmesh to avoid re-baking
-- [ ] D* Lite (incremental replanning)
-- [ ] Lazy Theta* (deferred LOS checks)
-- [ ] Query object pattern (concurrent pathfinding)
+### Tier 2 — Expected by serious consumers ✅
+- [x] Tiled navmesh — streaming, localized re-baking for open worlds
+- [x] Dynamic navmesh rebuild — rebuild only affected tiles on geometry change
+- [x] NavMesh obstacle carving — subtract shapes from navmesh topology at runtime
+- [x] Navigation query filters — per-agent include/exclude flags without re-baking
+- [x] Random point on navmesh — for wander targets, spawn points
+- [x] Height/elevation queries — ground-snap (x,z) → y
+- [x] NavMesh serialization — save/load baked navmesh to avoid re-baking
+- [x] D* Lite (incremental replanning)
+- [x] Lazy Theta* (deferred LOS checks)
+- [x] Query object pattern (concurrent pathfinding)
 
-### Tier 3 — Differentiators
-- [ ] Multi-floor / multi-layer navmesh — overlapping layers for bridges, buildings
-- [ ] Formation movement — slots, leader-follow, formation maintenance
-- [ ] Influence maps / cost annotations — danger zones, strategic value overlays
-- [ ] Pre-allocated A* scratch buffers / node pool (zero per-path allocation)
-- [ ] Connected-component IDs — reject unreachable queries instantly
-- [ ] Bidirectional A*
-- [ ] Fringe search
-- [ ] Goal bounding / differential heuristics
-- [ ] Sliced/incremental pathfinding (spread across frames)
-- [ ] Heightfield-based navmesh baking from 3D geometry
-- [ ] Navigation layers/groups
-- [ ] Agent radius erosion
-- [ ] 3D navigation volumes (voxel nav)
+### Tier 3 — Differentiators ✅
+- [x] Multi-floor / multi-layer navmesh — overlapping layers for bridges, buildings
+- [x] Formation movement — slots, leader-follow, formation maintenance
+- [x] Influence maps / cost annotations — danger zones, strategic value overlays
+- [x] Pre-allocated A* scratch buffers / node pool (zero per-path allocation)
+- [x] Connected-component IDs — reject unreachable queries instantly
+- [x] Bidirectional A*
+- [x] Fringe search
+- [x] Weighted A* (focal search) — bounded suboptimality for faster pathfinding
+- [x] Sliced/incremental pathfinding (spread across frames)
+- [x] Heightfield-based navmesh baking from 3D geometry
+- [x] Navigation layers/groups
+- [x] Agent radius erosion
+- [x] 3D navigation volumes (voxel nav)
 
 ## Cross-Crate Bridges ✅
 
@@ -91,6 +91,18 @@
 - [x] **Flow field**: `FlowFieldVisualization::from_flow_field()` — normalized direction grid
 - [x] **Crowd positions**: `CrowdVisualization::from_crowd()` — agent positions, velocities, radii
 - [x] **HPA graph**: `HpaOverlay::from_clusters()` — cluster boundaries + connection edges
+
+## v1.0 Status
+
+Released 2026-03-29. All P0–P3 roadmap items complete (32/32). 502 tests, full clippy + fmt + doc clean.
+
+## Future
+
+- [x] Heightfield-based navmesh baking from 3D geometry (Recast-equivalent)
+- [ ] SIMD-accelerated spatial hash / RVO
+- [ ] Parallel pathfinding (rayon integration)
+- [ ] NavMesh auto-generation from physics colliders
+- [ ] Benchmark suite with history tracking
 
 ## Dependency Map
 

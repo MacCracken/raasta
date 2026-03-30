@@ -35,22 +35,30 @@ pub mod bridge;
 mod corridor;
 mod crowd;
 mod debug_draw;
+mod dstar;
 mod error;
 mod follow;
+mod formation;
 mod grid;
+mod heightfield;
 mod hpa;
 mod incremental;
+mod influence;
 /// Integration APIs for downstream consumers (soorat rendering).
 pub mod integration;
 mod mesh;
 mod mesh3d;
+mod multilayer;
 mod offmesh;
 mod path;
+mod query;
 mod rvo;
 mod smooth;
 mod steer;
 mod steer3d;
+mod tiled;
 mod triangulate;
+mod voxel;
 
 #[cfg(feature = "logging")]
 pub mod logging;
@@ -64,15 +72,26 @@ pub use blend::{PrioritizedSteer, WeightedSteer, blend_priority, blend_weighted}
 pub use corridor::PathCorridor;
 pub use crowd::CrowdSimulation;
 pub use debug_draw::{DebugDraw, DebugLine, DebugPoint};
+pub use dstar::DStarLite;
 pub use error::NavError;
 pub use follow::PathFollower;
+pub use formation::{Formation, FormationShape};
 pub use grid::{GridPos, NavGrid};
+pub use heightfield::{
+    HeightSpan, Heightfield, HeightfieldConfig, bake_from_heightfield, bake_navmesh_from_geometry,
+};
 pub use hpa::{AbstractGraph, AbstractNodeId, ClusterId, Entrance, GridClusters};
 pub use incremental::{IncrementalGridPath, IncrementalStatus};
-pub use mesh::{AreaCostMultiplier, NavMesh, NavPoly, NavPolyId};
+pub use influence::InfluenceMap;
+pub use mesh::{
+    AreaCostMultiplier, CarveShape, CarvedObstacle, CarvedObstacleId, NavMesh, NavPoly, NavPolyId,
+    NavQueryFilter, ObstacleCarver, erode_navmesh,
+};
 pub use mesh3d::{NavMesh3D, NavPoly3D};
+pub use multilayer::{LayerConnection, LayerId, LayeredPolyId, MultiLayerNavMesh};
 pub use offmesh::{LinkType, OffMeshLink, OffMeshLinkDesc, OffMeshLinkId, OffMeshLinkRegistry};
 pub use path::{PathRequest, PathResult, PathStatus};
+pub use query::GridPathQuery;
 pub use rvo::{HalfPlane, RvoAgent, RvoSimulation, compute_orca_half_plane, solve_velocity};
 pub use smooth::{Portal, extract_portals, funnel_portals, funnel_smooth};
 pub use steer::{
@@ -80,4 +99,6 @@ pub use steer::{
     evade, pursuit, separation, wander,
 };
 pub use steer3d::{SteerBehavior3D, SteerOutput3D, compute_steer_3d};
+pub use tiled::{GlobalPolyId, NavTile, TileCoord, TiledNavMesh};
 pub use triangulate::{merge_convex, triangulate, triangulate_points};
+pub use voxel::{NavVolume, VoxelPos};

@@ -39,6 +39,7 @@ fn navmesh_pathfinding_end_to_end() {
         ],
         neighbors: vec![NavPolyId(1)],
         cost: 1.0,
+        layer: 0,
     });
     mesh.add_poly(NavPoly {
         id: NavPolyId(1),
@@ -50,6 +51,7 @@ fn navmesh_pathfinding_end_to_end() {
         ],
         neighbors: vec![NavPolyId(0), NavPolyId(2)],
         cost: 1.0,
+        layer: 0,
     });
     mesh.add_poly(NavPoly {
         id: NavPolyId(2),
@@ -61,6 +63,7 @@ fn navmesh_pathfinding_end_to_end() {
         ],
         neighbors: vec![NavPolyId(1)],
         cost: 1.0,
+        layer: 0,
     });
 
     let path = mesh.find_path(Vec2::ONE, Vec2::new(5.0, 1.0));

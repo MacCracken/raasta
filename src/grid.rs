@@ -849,6 +849,137 @@ impl NavGrid {
         None
     }
 
+    /// Find a path using Lazy Theta\* (any-angle with deferred LOS checks).
+    ///
+    /// Like Theta\*, produces smooth any-angle paths, but defers line-of-sight
+    /// checks until a node is expanded rather than when it's generated.
+    /// This typically requires fewer LOS checks than standard Theta\*.
+    #[cfg_attr(feature = "logging", instrument(skip(self)))]
+    #[must_use]
+    pub fn find_path_lazy_theta(&self, start: GridPos, goal: GridPos) -> Option<Vec<GridPos>> {
+        if !self.is_walkable(start.x, start.y) || !self.is_walkable(goal.x, goal.y) {
+            return None;
+        }
+        if start == goal {
+            return Some(vec![start]);
+        }
+
+        let len = self.width * self.height;
+        let mut g_score = vec![f32::INFINITY; len];
+        // parent stores the index of the node's parent in the path
+        // In lazy theta*, we optimistically set parent to grandparent
+        let mut parent: Vec<Option<usize>> = vec![None; len];
+        let mut closed = vec![false; len];
+        let mut open = BinaryHeap::new();
+
+        let start_idx = self.index(start.x, start.y)?;
+        let goal_idx = self.index(goal.x, goal.y)?;
+
+        g_score[start_idx] = 0.0;
+        let h = start.octile_distance(goal);
+        open.push(AStarNode {
+            idx: start_idx,
+            f_score: h,
+        });
+
+        let mut neighbors_buf = [(0i32, 0i32, 0.0f32); 8];
+
+        while let Some(current) = open.pop() {
+            if current.idx == goal_idx {
+                return Some(self.reconstruct_path(&parent, goal_idx));
+            }
+
+            if closed[current.idx] {
+                continue;
+            }
+
+            let cx = (current.idx % self.width) as i32;
+            let cy = (current.idx / self.width) as i32;
+            let current_pos = GridPos::new(cx, cy);
+
+            // LAZY THETA* KEY: check LOS now (at expansion time)
+            // If current's parent has LOS to current, keep the parent link.
+            // Otherwise, revert to best adjacent neighbor as parent (like A*).
+            if let Some(pp_idx) = parent[current.idx] {
+                let pp_pos =
+                    GridPos::new((pp_idx % self.width) as i32, (pp_idx / self.width) as i32);
+                if !self.has_line_of_sight(pp_pos, current_pos) {
+                    // No LOS — find the best actual neighbor as parent
+                    let mut best_g = f32::INFINITY;
+                    let mut best_parent = None;
+                    let count = self.neighbors_into(cx, cy, &mut neighbors_buf);
+                    for &(nx, ny, move_cost) in &neighbors_buf[..count] {
+                        let n_idx = self.index_unchecked(nx, ny);
+                        if closed[n_idx] {
+                            let g = g_score[n_idx] + move_cost * self.costs[n_idx];
+                            if g < best_g {
+                                best_g = g;
+                                best_parent = Some(n_idx);
+                            }
+                        }
+                    }
+                    if let Some(bp) = best_parent {
+                        parent[current.idx] = Some(bp);
+                        g_score[current.idx] = best_g;
+                    }
+                }
+            }
+
+            closed[current.idx] = true;
+            let current_g = g_score[current.idx];
+
+            // Expand neighbors
+            let count = self.neighbors_into(cx, cy, &mut neighbors_buf);
+            for &(nx, ny, _) in &neighbors_buf[..count] {
+                let n_idx = self.index_unchecked(nx, ny);
+                if closed[n_idx] {
+                    continue;
+                }
+
+                let neighbor_pos = GridPos::new(nx, ny);
+
+                // Optimistically assume LOS from current's parent to neighbor
+                let (source_idx, source_g) = if let Some(pp_idx) = parent[current.idx] {
+                    (pp_idx, g_score[pp_idx])
+                } else {
+                    (current.idx, current_g)
+                };
+
+                let source_pos = GridPos::new(
+                    (source_idx % self.width) as i32,
+                    (source_idx / self.width) as i32,
+                );
+
+                // Cost: Euclidean distance from source to neighbor
+                let tentative_g = source_g + source_pos.octile_distance(neighbor_pos);
+
+                // Also compute normal A* cost through current
+                let normal_g =
+                    current_g + current_pos.octile_distance(neighbor_pos) * self.costs[n_idx];
+
+                if tentative_g < g_score[n_idx] {
+                    parent[n_idx] = Some(source_idx);
+                    g_score[n_idx] = tentative_g;
+                    let h = neighbor_pos.octile_distance(goal);
+                    open.push(AStarNode {
+                        idx: n_idx,
+                        f_score: tentative_g + h,
+                    });
+                } else if normal_g < g_score[n_idx] {
+                    parent[n_idx] = Some(current.idx);
+                    g_score[n_idx] = normal_g;
+                    let h = neighbor_pos.octile_distance(goal);
+                    open.push(AStarNode {
+                        idx: n_idx,
+                        f_score: normal_g + h,
+                    });
+                }
+            }
+        }
+
+        None
+    }
+
     /// Generate a flow field toward the given goal.
     ///
     /// Returns a grid-sized Vec of direction vectors `(dx, dy)` where
@@ -1021,6 +1152,182 @@ impl NavGrid {
         count
     }
 
+    /// Find a path using fringe search.
+    ///
+    /// An IDA\*-like algorithm that iteratively deepens with a threshold.
+    /// Uses a flat list instead of a priority queue, which can be more
+    /// cache-friendly than A\* on large grids.
+    #[cfg_attr(feature = "logging", instrument(skip(self)))]
+    #[must_use]
+    pub fn find_path_fringe(&self, start: GridPos, goal: GridPos) -> Option<Vec<GridPos>> {
+        if !self.is_walkable(start.x, start.y) || !self.is_walkable(goal.x, goal.y) {
+            return None;
+        }
+        if start == goal {
+            return Some(vec![start]);
+        }
+
+        let len = self.width * self.height;
+        let start_idx = self.index(start.x, start.y)?;
+        let goal_idx = self.index(goal.x, goal.y)?;
+
+        let mut g_score = vec![f32::INFINITY; len];
+        let mut came_from: Vec<Option<usize>> = vec![None; len];
+
+        g_score[start_idx] = 0.0;
+
+        let h_start = if self.allow_diagonal {
+            start.octile_distance(goal)
+        } else {
+            start.manhattan_distance(goal) as f32
+        };
+
+        let mut threshold = h_start;
+        let mut fringe = vec![start_idx];
+        let mut neighbors_buf = [(0i32, 0i32, 0.0f32); 8];
+
+        loop {
+            let mut next_threshold = f32::INFINITY;
+            let mut next_fringe: Vec<usize> = Vec::new();
+            let current_fringe = std::mem::take(&mut fringe);
+
+            if current_fringe.is_empty() {
+                return None;
+            }
+
+            for &node_idx in &current_fringe {
+                let nx = (node_idx % self.width) as i32;
+                let ny = (node_idx / self.width) as i32;
+                let node_pos = GridPos::new(nx, ny);
+                let h = if self.allow_diagonal {
+                    node_pos.octile_distance(goal)
+                } else {
+                    node_pos.manhattan_distance(goal) as f32
+                };
+                let f = g_score[node_idx] + h;
+
+                if f > threshold {
+                    next_fringe.push(node_idx);
+                    if f < next_threshold {
+                        next_threshold = f;
+                    }
+                    continue;
+                }
+
+                if node_idx == goal_idx {
+                    return Some(self.reconstruct_path(&came_from, goal_idx));
+                }
+
+                let count = self.neighbors_into(nx, ny, &mut neighbors_buf);
+                for &(cnx, cny, move_cost) in &neighbors_buf[..count] {
+                    let n_idx = self.index_unchecked(cnx, cny);
+                    let tentative_g = g_score[node_idx] + move_cost * self.costs[n_idx];
+
+                    if tentative_g < g_score[n_idx] {
+                        g_score[n_idx] = tentative_g;
+                        came_from[n_idx] = Some(node_idx);
+                        next_fringe.push(n_idx);
+                    }
+                }
+            }
+
+            fringe = next_fringe;
+
+            if fringe.is_empty() {
+                return None;
+            }
+
+            threshold = next_threshold;
+        }
+    }
+
+    /// Find a path using weighted A\* (focal search).
+    ///
+    /// Uses an inflated heuristic (`weight * h(n)`) to find paths faster
+    /// at the cost of bounded suboptimality. A weight of 1.0 gives optimal
+    /// A\*; higher weights find paths faster but up to `weight` times longer.
+    ///
+    /// `weight` is clamped to minimum 1.0.
+    #[cfg_attr(feature = "logging", instrument(skip(self)))]
+    #[must_use]
+    pub fn find_path_weighted(
+        &self,
+        start: GridPos,
+        goal: GridPos,
+        weight: f32,
+    ) -> Option<Vec<GridPos>> {
+        let weight = weight.max(1.0);
+
+        if !self.is_walkable(start.x, start.y) || !self.is_walkable(goal.x, goal.y) {
+            return None;
+        }
+        if start == goal {
+            return Some(vec![start]);
+        }
+
+        let len = self.width * self.height;
+        let mut g_score = vec![f32::INFINITY; len];
+        let mut came_from: Vec<Option<usize>> = vec![None; len];
+        let mut closed = vec![false; len];
+        let mut open = BinaryHeap::new();
+
+        let start_idx = self.index(start.x, start.y)?;
+        let goal_idx = self.index(goal.x, goal.y)?;
+
+        g_score[start_idx] = 0.0;
+        let h = if self.allow_diagonal {
+            start.octile_distance(goal)
+        } else {
+            start.manhattan_distance(goal) as f32
+        };
+        open.push(AStarNode {
+            idx: start_idx,
+            f_score: weight * h,
+        });
+
+        let mut neighbors_buf = [(0i32, 0i32, 0.0f32); 8];
+
+        while let Some(current) = open.pop() {
+            if current.idx == goal_idx {
+                return Some(self.reconstruct_path(&came_from, goal_idx));
+            }
+
+            if closed[current.idx] {
+                continue;
+            }
+            closed[current.idx] = true;
+
+            let cx = (current.idx % self.width) as i32;
+            let cy = (current.idx / self.width) as i32;
+            let count = self.neighbors_into(cx, cy, &mut neighbors_buf);
+
+            for &(nx, ny, move_cost) in &neighbors_buf[..count] {
+                let n_idx = self.index_unchecked(nx, ny);
+                if closed[n_idx] {
+                    continue;
+                }
+                let tentative_g = g_score[current.idx] + move_cost * self.costs[n_idx];
+
+                if tentative_g < g_score[n_idx] {
+                    came_from[n_idx] = Some(current.idx);
+                    g_score[n_idx] = tentative_g;
+                    let np = GridPos::new(nx, ny);
+                    let h = if self.allow_diagonal {
+                        np.octile_distance(goal)
+                    } else {
+                        np.manhattan_distance(goal) as f32
+                    };
+                    open.push(AStarNode {
+                        idx: n_idx,
+                        f_score: tentative_g + weight * h,
+                    });
+                }
+            }
+        }
+
+        None
+    }
+
     fn reconstruct_path(&self, came_from: &[Option<usize>], goal_idx: usize) -> Vec<GridPos> {
         let mut path = Vec::new();
         let mut current = goal_idx;
@@ -1035,6 +1342,240 @@ impl NavGrid {
         }
         path.reverse();
         path
+    }
+
+    /// Compute connected-component IDs for all walkable cells.
+    ///
+    /// Returns a grid-sized Vec where each cell contains its component ID.
+    /// Unwalkable cells get `u32::MAX`. Two cells with the same ID are
+    /// mutually reachable. Use to reject unreachable pathfinding queries instantly.
+    #[cfg_attr(feature = "logging", instrument(skip(self)))]
+    #[must_use]
+    pub fn connected_components(&self) -> Vec<u32> {
+        use std::collections::VecDeque;
+
+        let len = self.width * self.height;
+        let mut component = vec![u32::MAX; len];
+        let mut current_id: u32 = 0;
+        let mut queue = VecDeque::new();
+        let mut neighbors_buf = [(0i32, 0i32, 0.0f32); 8];
+
+        for start in 0..len {
+            // Skip unwalkable or already-assigned cells
+            let sx = (start % self.width) as i32;
+            let sy = (start / self.width) as i32;
+            if !self.is_walkable(sx, sy) || component[start] != u32::MAX {
+                continue;
+            }
+
+            // BFS flood-fill from this cell
+            component[start] = current_id;
+            queue.push_back(start);
+
+            while let Some(idx) = queue.pop_front() {
+                let cx = (idx % self.width) as i32;
+                let cy = (idx / self.width) as i32;
+                let count = self.neighbors_into(cx, cy, &mut neighbors_buf);
+
+                for &(nx, ny, _) in &neighbors_buf[..count] {
+                    let n_idx = self.index_unchecked(nx, ny);
+                    if component[n_idx] == u32::MAX && self.is_walkable(nx, ny) {
+                        component[n_idx] = current_id;
+                        queue.push_back(n_idx);
+                    }
+                }
+            }
+
+            current_id = current_id.saturating_add(1);
+        }
+
+        component
+    }
+
+    /// Find a path using bidirectional A*.
+    ///
+    /// Searches from both start and goal simultaneously. Terminates when
+    /// the two search frontiers meet, typically expanding fewer nodes
+    /// than unidirectional A*.
+    #[cfg_attr(feature = "logging", instrument(skip(self)))]
+    #[must_use]
+    pub fn find_path_bidirectional(&self, start: GridPos, goal: GridPos) -> Option<Vec<GridPos>> {
+        if !self.is_walkable(start.x, start.y) || !self.is_walkable(goal.x, goal.y) {
+            return None;
+        }
+        if start == goal {
+            return Some(vec![start]);
+        }
+
+        let len = self.width * self.height;
+        let start_idx = self.index(start.x, start.y)?;
+        let goal_idx = self.index(goal.x, goal.y)?;
+
+        let mut g_fwd = vec![f32::INFINITY; len];
+        let mut g_bwd = vec![f32::INFINITY; len];
+        let mut came_from_fwd: Vec<Option<usize>> = vec![None; len];
+        let mut came_from_bwd: Vec<Option<usize>> = vec![None; len];
+        let mut closed_fwd = vec![false; len];
+        let mut closed_bwd = vec![false; len];
+        let mut open_fwd = BinaryHeap::new();
+        let mut open_bwd = BinaryHeap::new();
+
+        g_fwd[start_idx] = 0.0;
+        g_bwd[goal_idx] = 0.0;
+
+        let h_start = if self.allow_diagonal {
+            start.octile_distance(goal)
+        } else {
+            start.manhattan_distance(goal) as f32
+        };
+        open_fwd.push(AStarNode {
+            idx: start_idx,
+            f_score: h_start,
+        });
+        open_bwd.push(AStarNode {
+            idx: goal_idx,
+            f_score: h_start,
+        });
+
+        let mut mu = f32::INFINITY;
+        let mut best_meeting: Option<usize> = None;
+        let mut neighbors_buf = [(0i32, 0i32, 0.0f32); 8];
+
+        loop {
+            // Check termination: both open sets exhausted or min f-scores sum >= mu
+            let min_f_fwd = open_fwd.peek().map(|n| n.f_score);
+            let min_f_bwd = open_bwd.peek().map(|n| n.f_score);
+
+            match (min_f_fwd, min_f_bwd) {
+                (None, None) => break,
+                (Some(f_f), Some(f_b)) => {
+                    if f_f + f_b >= mu {
+                        break;
+                    }
+                }
+                (Some(f_f), None) => {
+                    if f_f >= mu {
+                        break;
+                    }
+                }
+                (None, Some(f_b)) => {
+                    if f_b >= mu {
+                        break;
+                    }
+                }
+            }
+
+            // Expand forward
+            if let Some(current) = open_fwd.pop()
+                && !closed_fwd[current.idx]
+            {
+                closed_fwd[current.idx] = true;
+
+                let cx = (current.idx % self.width) as i32;
+                let cy = (current.idx / self.width) as i32;
+                let count = self.neighbors_into(cx, cy, &mut neighbors_buf);
+
+                for &(nx, ny, move_cost) in &neighbors_buf[..count] {
+                    let n_idx = self.index_unchecked(nx, ny);
+                    if closed_fwd[n_idx] {
+                        continue;
+                    }
+                    let tentative_g = g_fwd[current.idx] + move_cost * self.costs[n_idx];
+                    if tentative_g < g_fwd[n_idx] {
+                        came_from_fwd[n_idx] = Some(current.idx);
+                        g_fwd[n_idx] = tentative_g;
+                        let np = GridPos::new(nx, ny);
+                        let h = if self.allow_diagonal {
+                            np.octile_distance(goal)
+                        } else {
+                            np.manhattan_distance(goal) as f32
+                        };
+                        open_fwd.push(AStarNode {
+                            idx: n_idx,
+                            f_score: tentative_g + h,
+                        });
+                    }
+                    // Check if backward search has reached this node
+                    if closed_bwd[n_idx] {
+                        let total = g_fwd[n_idx] + g_bwd[n_idx];
+                        if total < mu {
+                            mu = total;
+                            best_meeting = Some(n_idx);
+                        }
+                    }
+                }
+            }
+
+            // Expand backward
+            if let Some(current) = open_bwd.pop()
+                && !closed_bwd[current.idx]
+            {
+                closed_bwd[current.idx] = true;
+
+                let cx = (current.idx % self.width) as i32;
+                let cy = (current.idx / self.width) as i32;
+                let count = self.neighbors_into(cx, cy, &mut neighbors_buf);
+
+                for &(nx, ny, move_cost) in &neighbors_buf[..count] {
+                    let n_idx = self.index_unchecked(nx, ny);
+                    if closed_bwd[n_idx] {
+                        continue;
+                    }
+                    let tentative_g = g_bwd[current.idx] + move_cost * self.costs[n_idx];
+                    if tentative_g < g_bwd[n_idx] {
+                        came_from_bwd[n_idx] = Some(current.idx);
+                        g_bwd[n_idx] = tentative_g;
+                        let np = GridPos::new(nx, ny);
+                        let h = if self.allow_diagonal {
+                            np.octile_distance(start)
+                        } else {
+                            np.manhattan_distance(start) as f32
+                        };
+                        open_bwd.push(AStarNode {
+                            idx: n_idx,
+                            f_score: tentative_g + h,
+                        });
+                    }
+                    // Check if forward search has reached this node
+                    if closed_fwd[n_idx] {
+                        let total = g_fwd[n_idx] + g_bwd[n_idx];
+                        if total < mu {
+                            mu = total;
+                            best_meeting = Some(n_idx);
+                        }
+                    }
+                }
+            }
+        }
+
+        let meeting = best_meeting?;
+
+        // Reconstruct: forward path from start to meeting
+        let mut fwd_path = Vec::new();
+        let mut current = meeting;
+        loop {
+            fwd_path.push(current);
+            match came_from_fwd[current] {
+                Some(prev) => current = prev,
+                None => break,
+            }
+        }
+        fwd_path.reverse();
+
+        // Backward path from meeting to goal (follow came_from_bwd)
+        current = meeting;
+        while let Some(next) = came_from_bwd[current] {
+            current = next;
+            fwd_path.push(current);
+        }
+
+        // Convert indices to GridPos
+        let path: Vec<GridPos> = fwd_path
+            .iter()
+            .map(|&idx| GridPos::new((idx % self.width) as i32, (idx / self.width) as i32))
+            .collect();
+
+        Some(path)
     }
 }
 
@@ -1837,6 +2378,438 @@ mod tests {
         grid.set_walkable(0, 0, false);
         assert!(
             grid.find_path_partial(GridPos::new(0, 0), GridPos::new(9, 9))
+                .is_none()
+        );
+    }
+
+    // --- Lazy Theta* tests ---
+
+    #[test]
+    fn lazy_theta_basic() {
+        let grid = NavGrid::new(10, 10, 1.0);
+        let path = grid.find_path_lazy_theta(GridPos::new(0, 0), GridPos::new(9, 9));
+        assert!(path.is_some());
+        let path = path.unwrap();
+        assert_eq!(*path.first().unwrap(), GridPos::new(0, 0));
+        assert_eq!(*path.last().unwrap(), GridPos::new(9, 9));
+    }
+
+    #[test]
+    fn lazy_theta_same_start_goal() {
+        let grid = NavGrid::new(10, 10, 1.0);
+        let path = grid.find_path_lazy_theta(GridPos::new(5, 5), GridPos::new(5, 5));
+        assert_eq!(path, Some(vec![GridPos::new(5, 5)]));
+    }
+
+    #[test]
+    fn lazy_theta_unwalkable() {
+        let mut grid = NavGrid::new(10, 10, 1.0);
+        grid.set_walkable(0, 0, false);
+        assert!(
+            grid.find_path_lazy_theta(GridPos::new(0, 0), GridPos::new(9, 9))
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn lazy_theta_blocked() {
+        let mut grid = NavGrid::new(10, 1, 1.0);
+        grid.set_walkable(5, 0, false);
+        assert!(
+            grid.find_path_lazy_theta(GridPos::new(0, 0), GridPos::new(9, 0))
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn lazy_theta_around_obstacle() {
+        let mut grid = NavGrid::new(10, 10, 1.0);
+        for y in 0..8 {
+            grid.set_walkable(5, y, false);
+        }
+        let path = grid.find_path_lazy_theta(GridPos::new(0, 0), GridPos::new(9, 0));
+        assert!(path.is_some());
+        let path = path.unwrap();
+        assert_eq!(*path.last().unwrap(), GridPos::new(9, 0));
+    }
+
+    #[test]
+    fn lazy_theta_fewer_waypoints_than_astar() {
+        // On an open grid, lazy theta* should produce fewer waypoints
+        // (more direct) than regular A*
+        let grid = NavGrid::new(20, 20, 1.0);
+        let astar = grid
+            .find_path(GridPos::new(0, 0), GridPos::new(19, 0))
+            .unwrap();
+        let theta = grid
+            .find_path_lazy_theta(GridPos::new(0, 0), GridPos::new(19, 0))
+            .unwrap();
+        // Theta* should have same or fewer waypoints
+        assert!(theta.len() <= astar.len());
+    }
+
+    // --- Fringe search tests ---
+
+    #[test]
+    fn fringe_empty_grid() {
+        let grid = NavGrid::new(10, 10, 1.0);
+        let path = grid.find_path_fringe(GridPos::new(0, 0), GridPos::new(9, 9));
+        assert!(path.is_some());
+        let path = path.unwrap();
+        assert_eq!(*path.first().unwrap(), GridPos::new(0, 0));
+        assert_eq!(*path.last().unwrap(), GridPos::new(9, 9));
+    }
+
+    #[test]
+    fn fringe_same_start_goal() {
+        let grid = NavGrid::new(5, 5, 1.0);
+        let path = grid.find_path_fringe(GridPos::new(2, 2), GridPos::new(2, 2));
+        assert_eq!(path, Some(vec![GridPos::new(2, 2)]));
+    }
+
+    #[test]
+    fn fringe_blocked_start() {
+        let mut grid = NavGrid::new(5, 5, 1.0);
+        grid.set_walkable(0, 0, false);
+        assert!(
+            grid.find_path_fringe(GridPos::new(0, 0), GridPos::new(4, 4))
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn fringe_blocked_goal() {
+        let mut grid = NavGrid::new(5, 5, 1.0);
+        grid.set_walkable(4, 4, false);
+        assert!(
+            grid.find_path_fringe(GridPos::new(0, 0), GridPos::new(4, 4))
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn fringe_blocked_no_path() {
+        let mut grid = NavGrid::new(5, 1, 1.0);
+        grid.set_walkable(2, 0, false);
+        assert!(
+            grid.find_path_fringe(GridPos::new(0, 0), GridPos::new(4, 0))
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn fringe_around_obstacle() {
+        let mut grid = NavGrid::new(10, 10, 1.0);
+        for y in 0..8 {
+            grid.set_walkable(5, y, false);
+        }
+        let path = grid.find_path_fringe(GridPos::new(0, 0), GridPos::new(9, 0));
+        assert!(path.is_some());
+        let path = path.unwrap();
+        assert_eq!(*path.last().unwrap(), GridPos::new(9, 0));
+        for p in &path {
+            assert!(
+                grid.is_walkable(p.x, p.y),
+                "unwalkable cell in fringe path: ({}, {})",
+                p.x,
+                p.y
+            );
+        }
+    }
+
+    #[test]
+    fn fringe_matches_astar_endpoints() {
+        let mut grid = NavGrid::new(20, 20, 1.0);
+        for y in 0..15 {
+            grid.set_walkable(10, y, false);
+        }
+        let astar_path = grid
+            .find_path(GridPos::new(0, 0), GridPos::new(19, 19))
+            .unwrap();
+        let fringe_path = grid
+            .find_path_fringe(GridPos::new(0, 0), GridPos::new(19, 19))
+            .unwrap();
+
+        assert_eq!(fringe_path.first(), astar_path.first());
+        assert_eq!(fringe_path.last(), astar_path.last());
+
+        // Fringe path should be contiguous
+        for w in fringe_path.windows(2) {
+            let dx = (w[1].x - w[0].x).abs();
+            let dy = (w[1].y - w[0].y).abs();
+            assert!(
+                dx <= 1 && dy <= 1 && (dx + dy) > 0,
+                "non-adjacent step in fringe path: ({},{}) -> ({},{})",
+                w[0].x,
+                w[0].y,
+                w[1].x,
+                w[1].y
+            );
+        }
+    }
+
+    // --- Weighted A* tests ---
+
+    #[test]
+    fn weighted_empty_grid() {
+        let grid = NavGrid::new(10, 10, 1.0);
+        let path = grid.find_path_weighted(GridPos::new(0, 0), GridPos::new(9, 9), 2.0);
+        assert!(path.is_some());
+        let path = path.unwrap();
+        assert_eq!(*path.first().unwrap(), GridPos::new(0, 0));
+        assert_eq!(*path.last().unwrap(), GridPos::new(9, 9));
+    }
+
+    #[test]
+    fn weighted_same_start_goal() {
+        let grid = NavGrid::new(5, 5, 1.0);
+        let path = grid.find_path_weighted(GridPos::new(2, 2), GridPos::new(2, 2), 1.5);
+        assert_eq!(path, Some(vec![GridPos::new(2, 2)]));
+    }
+
+    #[test]
+    fn weighted_blocked_start() {
+        let mut grid = NavGrid::new(5, 5, 1.0);
+        grid.set_walkable(0, 0, false);
+        assert!(
+            grid.find_path_weighted(GridPos::new(0, 0), GridPos::new(4, 4), 1.0)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn weighted_blocked_goal() {
+        let mut grid = NavGrid::new(5, 5, 1.0);
+        grid.set_walkable(4, 4, false);
+        assert!(
+            grid.find_path_weighted(GridPos::new(0, 0), GridPos::new(4, 4), 1.0)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn weighted_blocked_no_path() {
+        let mut grid = NavGrid::new(5, 1, 1.0);
+        grid.set_walkable(2, 0, false);
+        assert!(
+            grid.find_path_weighted(GridPos::new(0, 0), GridPos::new(4, 0), 3.0)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn weighted_1_0_matches_astar() {
+        // Weight 1.0 should produce the same optimal path as A*
+        let mut grid = NavGrid::new(20, 20, 1.0);
+        for y in 0..15 {
+            grid.set_walkable(10, y, false);
+        }
+        let astar_path = grid
+            .find_path(GridPos::new(0, 0), GridPos::new(19, 19))
+            .unwrap();
+        let weighted_path = grid
+            .find_path_weighted(GridPos::new(0, 0), GridPos::new(19, 19), 1.0)
+            .unwrap();
+
+        assert_eq!(astar_path, weighted_path);
+    }
+
+    #[test]
+    fn weighted_higher_weight_finds_path() {
+        // Higher weight should still find a valid path (possibly suboptimal)
+        let mut grid = NavGrid::new(20, 20, 1.0);
+        for y in 0..15 {
+            grid.set_walkable(10, y, false);
+        }
+        let path = grid
+            .find_path_weighted(GridPos::new(0, 0), GridPos::new(19, 19), 5.0)
+            .unwrap();
+
+        assert_eq!(*path.first().unwrap(), GridPos::new(0, 0));
+        assert_eq!(*path.last().unwrap(), GridPos::new(19, 19));
+
+        // Path should be contiguous
+        for w in path.windows(2) {
+            let dx = (w[1].x - w[0].x).abs();
+            let dy = (w[1].y - w[0].y).abs();
+            assert!(
+                dx <= 1 && dy <= 1 && (dx + dy) > 0,
+                "non-adjacent step in weighted path: ({},{}) -> ({},{})",
+                w[0].x,
+                w[0].y,
+                w[1].x,
+                w[1].y
+            );
+        }
+    }
+
+    #[test]
+    fn weighted_clamps_below_1() {
+        // Weight below 1.0 should be clamped to 1.0 (same as A*)
+        let grid = NavGrid::new(10, 10, 1.0);
+        let path_low = grid
+            .find_path_weighted(GridPos::new(0, 0), GridPos::new(9, 9), 0.5)
+            .unwrap();
+        let path_one = grid
+            .find_path_weighted(GridPos::new(0, 0), GridPos::new(9, 9), 1.0)
+            .unwrap();
+        assert_eq!(path_low, path_one);
+    }
+
+    // --- Connected components tests ---
+
+    #[test]
+    fn connected_components_all_walkable() {
+        let grid = NavGrid::new(5, 5, 1.0);
+        let comps = grid.connected_components();
+        // All walkable cells should have the same component ID
+        let first_id = comps[0];
+        assert_ne!(first_id, u32::MAX);
+        for &c in &comps {
+            assert_eq!(c, first_id);
+        }
+    }
+
+    #[test]
+    fn connected_components_two_islands() {
+        let mut grid = NavGrid::new(5, 5, 1.0);
+        // Wall across the middle row
+        for x in 0..5 {
+            grid.set_walkable(x, 2, false);
+        }
+        let comps = grid.connected_components();
+        // Check unwalkable cells
+        for x in 0..5 {
+            let idx = 2 * 5 + x as usize;
+            assert_eq!(comps[idx], u32::MAX);
+        }
+        // Top and bottom should be different components
+        let top_id = comps[0]; // (0,0)
+        let bottom_id = comps[3 * 5]; // (0,3)
+        assert_ne!(top_id, u32::MAX);
+        assert_ne!(bottom_id, u32::MAX);
+        assert_ne!(top_id, bottom_id);
+    }
+
+    #[test]
+    fn connected_components_unwalkable_cells_get_max() {
+        let mut grid = NavGrid::new(3, 3, 1.0);
+        grid.set_walkable(1, 1, false);
+        let comps = grid.connected_components();
+        let center_idx = 4; // (1,1) in a 3-wide grid
+        assert_eq!(comps[center_idx], u32::MAX);
+    }
+
+    #[test]
+    fn connected_components_empty_grid() {
+        let mut grid = NavGrid::new(3, 3, 1.0);
+        // Block all cells
+        for y in 0..3 {
+            for x in 0..3 {
+                grid.set_walkable(x, y, false);
+            }
+        }
+        let comps = grid.connected_components();
+        for &c in &comps {
+            assert_eq!(c, u32::MAX);
+        }
+    }
+
+    // --- Bidirectional A* tests ---
+
+    #[test]
+    fn bidir_basic_path() {
+        let grid = NavGrid::new(10, 10, 1.0);
+        let path = grid.find_path_bidirectional(GridPos::new(0, 0), GridPos::new(9, 9));
+        assert!(path.is_some());
+        let path = path.unwrap();
+        assert_eq!(*path.first().unwrap(), GridPos::new(0, 0));
+        assert_eq!(*path.last().unwrap(), GridPos::new(9, 9));
+    }
+
+    #[test]
+    fn bidir_same_start_goal() {
+        let grid = NavGrid::new(5, 5, 1.0);
+        let path = grid.find_path_bidirectional(GridPos::new(2, 2), GridPos::new(2, 2));
+        assert_eq!(path, Some(vec![GridPos::new(2, 2)]));
+    }
+
+    #[test]
+    fn bidir_blocked() {
+        let mut grid = NavGrid::new(5, 1, 1.0);
+        grid.set_walkable(2, 0, false);
+        let path = grid.find_path_bidirectional(GridPos::new(0, 0), GridPos::new(4, 0));
+        assert!(path.is_none());
+    }
+
+    #[test]
+    fn bidir_around_obstacle() {
+        let mut grid = NavGrid::new(10, 10, 1.0);
+        for y in 0..8 {
+            grid.set_walkable(5, y, false);
+        }
+        let path = grid.find_path_bidirectional(GridPos::new(0, 0), GridPos::new(9, 0));
+        assert!(path.is_some());
+        let path = path.unwrap();
+        assert_eq!(*path.first().unwrap(), GridPos::new(0, 0));
+        assert_eq!(*path.last().unwrap(), GridPos::new(9, 0));
+        // All cells in path should be walkable
+        for p in &path {
+            assert!(grid.is_walkable(p.x, p.y));
+        }
+    }
+
+    #[test]
+    fn bidir_matches_regular_astar() {
+        let mut grid = NavGrid::new(20, 20, 1.0);
+        for y in 0..15 {
+            grid.set_walkable(10, y, false);
+        }
+        let astar_path = grid
+            .find_path(GridPos::new(0, 0), GridPos::new(19, 19))
+            .unwrap();
+        let bidir_path = grid
+            .find_path_bidirectional(GridPos::new(0, 0), GridPos::new(19, 19))
+            .unwrap();
+
+        // Same endpoints
+        assert_eq!(bidir_path.first(), astar_path.first());
+        assert_eq!(bidir_path.last(), astar_path.last());
+
+        // Bidirectional path should be contiguous
+        for w in bidir_path.windows(2) {
+            let dx = (w[1].x - w[0].x).abs();
+            let dy = (w[1].y - w[0].y).abs();
+            assert!(
+                dx <= 1 && dy <= 1 && (dx + dy) > 0,
+                "non-adjacent step: ({},{}) -> ({},{})",
+                w[0].x,
+                w[0].y,
+                w[1].x,
+                w[1].y
+            );
+        }
+
+        // Path lengths should be equal (both optimal)
+        assert_eq!(astar_path.len(), bidir_path.len());
+    }
+
+    #[test]
+    fn bidir_blocked_start() {
+        let mut grid = NavGrid::new(5, 5, 1.0);
+        grid.set_walkable(0, 0, false);
+        assert!(
+            grid.find_path_bidirectional(GridPos::new(0, 0), GridPos::new(4, 4))
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn bidir_blocked_goal() {
+        let mut grid = NavGrid::new(5, 5, 1.0);
+        grid.set_walkable(4, 4, false);
+        assert!(
+            grid.find_path_bidirectional(GridPos::new(0, 0), GridPos::new(4, 4))
                 .is_none()
         );
     }

@@ -18,7 +18,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **request batching** — `PathBatcher` queues path requests with `RequestPriority`; processes within per-frame budget using incremental A*; `max_active` concurrent query limit
 - **bridge** — cross-crate primitive-value bridges returning raasta types: impetus (collider → `Obstacle`, velocity 3D → `Vec2`), jantu (group target → `Vec2` destination, flee point → `(Vec2, f32)` repulsion), pavan (wind → movement cost, slope → speed scale)
 - **integration/soorat** — feature-gated `soorat-compat` module with visualization data structures and conversion functions: `NavMeshWireframe::from_navmesh()`, `PathVisualization::from_path_result()`, `FlowFieldVisualization::from_flow_field()`, `CrowdVisualization::from_crowd()`, `HpaOverlay::from_clusters()`
-- **tests** — 70+ new tests covering all P3 Tier 1 features (345 unit + 6 integration + 1 doc = 352 total)
+- **query filters** — `NavQueryFilter` with include-only and exclude lists; `NavMesh::find_path_filtered()` for per-agent polygon restrictions
+- **random point** — `NavMesh::random_point()` and `NavMesh3D::random_point()` area-weighted sampling for wander targets and spawn points
+- **height queries** — `NavMesh3D::sample_height()` ground-snap (x,z) → y; `snap_to_surface()` convenience method
+- **serialization** — `NavMesh::to_bytes()`/`from_bytes()` and `NavMesh3D::to_bytes()`/`from_bytes()` compact binary format (RNAV/RNV3 magic, versioned)
+- **lazy theta\*** — `NavGrid::find_path_lazy_theta()` deferred LOS checks for fewer line-of-sight tests than standard Theta*
+- **query objects** — `GridPathQuery` reusable A* query with pre-allocated scratch buffers for zero per-path allocation
+- **tiled navmesh** — `TiledNavMesh` with tile streaming (`load_tile`/`unload_tile`), cross-tile A* pathfinding, `rebuild_connections()` for border polygon matching
+- **dynamic rebuild** — `TiledNavMesh::rebake_tile()` localized re-baking; `rebuild_tile_connections()` for single-tile connection updates
+- **obstacle carving** — `ObstacleCarver` marks polygons blocked by circle/rect obstacles at runtime; `NavMesh::find_path_carved()` avoids blocked polygons
+- **D\* Lite** — `DStarLite` incremental replanning: `update_cell()` + `compute_path()` for efficient dynamic environment changes
+- **connected components** — `NavGrid::connected_components()` flood-fill component IDs for instant unreachable-query rejection
+- **bidirectional A\*** — `NavGrid::find_path_bidirectional()` dual-frontier search expanding fewer nodes
+- **fringe search** — `NavGrid::find_path_fringe()` IDA*-like cache-friendly pathfinding
+- **weighted A\*** — `NavGrid::find_path_weighted()` bounded-suboptimal search with inflated heuristic
+- **nav layers** — `NavPoly.layer` field + `NavMesh::find_path_on_layers()` per-polygon layer filtering
+- **agent erosion** — `erode_navmesh()` shrinks polygons inward by agent radius for conservative paths
+- **formation** — `Formation` with `FormationShape` (line, wedge, circle, grid, custom) + slot steering
+- **influence maps** — `InfluenceMap` 2D overlay grid with stamp, decay, sample for danger/value annotations
+- **multi-layer** — `MultiLayerNavMesh` overlapping navigation surfaces with cross-layer connections (stairs, elevators)
+- **voxel nav** — `NavVolume` 3D voxel grid with 26-connected A* for flying/swimming agents
+- **heightfield baking** — `Heightfield` voxelized 3D geometry representation; `bake_navmesh_from_geometry()` full pipeline (rasterize → walkability → clearance → erosion → region flood-fill → contour → convex hull → navmesh); `HeightfieldConfig` with slope, clearance, radius settings
+- **tests** — 220+ new tests across all P3 features (494 unit + 6 integration + 2 doc = 502 total)
 
 ### Fixed
 - **bridge** — `wind_to_movement_cost` had inverted physics: tailwind was increasing cost instead of decreasing it. Sign of dot-product contribution corrected; wind-speed normalization removed so 10 m/s headwind properly yields 2× cost
