@@ -7,47 +7,64 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ## [1.0.0] — 2026-03-29
 
 ### Added
-- **partial path** — `NavGrid::find_path_partial()` and `NavMesh::find_path_partial()` return path to closest reachable point when goal is unreachable; `PathStatus::Partial` variant and `PathResult::partial()` constructor
-- **area costs** — `NavPoly.cost` field for per-polygon traversal cost; `AreaCostMultiplier` for per-agent cost overrides; `NavMesh::find_path_with_costs()` with combined polygon + agent multipliers
-- **spatial hashing** — `RvoSimulation::step()` now uses spatial hash grid for neighbor queries (O(n²) → O(n·k)); `RvoSimulation::with_neighbor_dist()` for custom interaction radius
-- **behavior blending** — `blend_weighted()` for weighted steering combination; `blend_priority()` for priority-based selection with fallback; `WeightedSteer` and `PrioritizedSteer` types
-- **off-mesh links** — `OffMeshLinkRegistry` for managing jump/ladder/teleport/door links; `NavMesh::find_path_with_links()` integrates links as A* edges; enable/disable support for dynamic doors
-- **funnel (SSFA)** — `funnel_portals()` proper Simple Stupid Funnel Algorithm on portal edges with agent radius shrinking; `extract_portals()` extracts shared edges from polygon paths; `Portal` type
-- **path corridor** — `PathCorridor` sliding window over navmesh polygon paths; `move_position()`, `trim_passed()`, `replan()`, `replan_local()` for local replanning; `smooth_path()` integration with funnel algorithm
-- **incremental pathfinding** — `IncrementalGridPath` time-sliced A* with per-frame iteration budget; `step()` returns `IncrementalStatus` for cooperative scheduling
-- **request batching** — `PathBatcher` queues path requests with `RequestPriority`; processes within per-frame budget using incremental A*; `max_active` concurrent query limit
-- **bridge** — cross-crate primitive-value bridges returning raasta types: impetus (collider → `Obstacle`, velocity 3D → `Vec2`), jantu (group target → `Vec2` destination, flee point → `(Vec2, f32)` repulsion), pavan (wind → movement cost, slope → speed scale)
-- **integration/soorat** — feature-gated `soorat-compat` module with visualization data structures and conversion functions: `NavMeshWireframe::from_navmesh()`, `PathVisualization::from_path_result()`, `FlowFieldVisualization::from_flow_field()`, `CrowdVisualization::from_crowd()`, `HpaOverlay::from_clusters()`
-- **query filters** — `NavQueryFilter` with include-only and exclude lists; `NavMesh::find_path_filtered()` for per-agent polygon restrictions
-- **random point** — `NavMesh::random_point()` and `NavMesh3D::random_point()` area-weighted sampling for wander targets and spawn points
-- **height queries** — `NavMesh3D::sample_height()` ground-snap (x,z) → y; `snap_to_surface()` convenience method
-- **serialization** — `NavMesh::to_bytes()`/`from_bytes()` and `NavMesh3D::to_bytes()`/`from_bytes()` compact binary format (RNAV/RNV3 magic, versioned)
+
+#### Pathfinding Algorithms
 - **lazy theta\*** — `NavGrid::find_path_lazy_theta()` deferred LOS checks for fewer line-of-sight tests than standard Theta*
-- **query objects** — `GridPathQuery` reusable A* query with pre-allocated scratch buffers for zero per-path allocation
-- **tiled navmesh** — `TiledNavMesh` with tile streaming (`load_tile`/`unload_tile`), cross-tile A* pathfinding, `rebuild_connections()` for border polygon matching
-- **dynamic rebuild** — `TiledNavMesh::rebake_tile()` localized re-baking; `rebuild_tile_connections()` for single-tile connection updates
-- **obstacle carving** — `ObstacleCarver` marks polygons blocked by circle/rect obstacles at runtime; `NavMesh::find_path_carved()` avoids blocked polygons
 - **D\* Lite** — `DStarLite` incremental replanning: `update_cell()` + `compute_path()` for efficient dynamic environment changes
-- **connected components** — `NavGrid::connected_components()` flood-fill component IDs for instant unreachable-query rejection
 - **bidirectional A\*** — `NavGrid::find_path_bidirectional()` dual-frontier search expanding fewer nodes
 - **fringe search** — `NavGrid::find_path_fringe()` IDA*-like cache-friendly pathfinding
 - **weighted A\*** — `NavGrid::find_path_weighted()` bounded-suboptimal search with inflated heuristic
+- **partial path** — `NavGrid::find_path_partial()` and `NavMesh::find_path_partial()` return path to closest reachable point when goal is unreachable; `PathStatus::Partial` variant
+- **connected components** — `NavGrid::connected_components()` flood-fill component IDs for instant unreachable-query rejection
+- **incremental pathfinding** — `IncrementalGridPath` time-sliced A* with per-frame iteration budget; `step()` returns `IncrementalStatus` for cooperative scheduling
+- **request batching** — `PathBatcher` queues path requests with `RequestPriority`; processes within per-frame budget; `max_active` concurrent query limit
+- **query objects** — `GridPathQuery` reusable A* query with pre-allocated scratch buffers for zero per-path allocation
+
+#### NavMesh Features
+- **area costs** — `NavPoly.cost` field for per-polygon traversal cost; `AreaCostMultiplier` for per-agent cost overrides; `NavMesh::find_path_with_costs()`
+- **off-mesh links** — `OffMeshLinkRegistry` for jump/ladder/teleport/door links; `NavMesh::find_path_with_links()` integrates links as A* edges; enable/disable for dynamic doors
+- **funnel (SSFA)** — `funnel_portals()` proper Simple Stupid Funnel Algorithm on portal edges with agent radius shrinking; `Portal` type
+- **path corridor** — `PathCorridor` sliding window over navmesh polygon paths; `move_position()`, `trim_passed()`, `replan()`, `replan_local()`
+- **tiled navmesh** — `TiledNavMesh` with tile streaming (`load_tile`/`unload_tile`), cross-tile A* pathfinding, `rebuild_connections()`
+- **dynamic rebuild** — `TiledNavMesh::rebake_tile()` localized re-baking; `rebuild_tile_connections()` for single-tile connection updates
+- **obstacle carving** — `ObstacleCarver` marks polygons blocked by circle/rect obstacles at runtime; `NavMesh::find_path_carved()`
+- **query filters** — `NavQueryFilter` with include/exclude lists; `NavMesh::find_path_filtered()` for per-agent polygon restrictions
 - **nav layers** — `NavPoly.layer` field + `NavMesh::find_path_on_layers()` per-polygon layer filtering
 - **agent erosion** — `erode_navmesh()` shrinks polygons inward by agent radius for conservative paths
+- **random point** — `NavMesh::random_point()` and `NavMesh3D::random_point()` area-weighted sampling for wander/spawn
+- **serialization** — `NavMesh::to_bytes()`/`from_bytes()` and `NavMesh3D::to_bytes()`/`from_bytes()` compact binary format (RNAV/RNV3 magic, versioned)
+
+#### Steering & Agents
+- **behavior blending** — `blend_weighted()` for weighted steering combination; `blend_priority()` for priority-based selection with fallback; `WeightedSteer` and `PrioritizedSteer` types
 - **formation** — `Formation` with `FormationShape` (line, wedge, circle, grid, custom) + slot steering
 - **influence maps** — `InfluenceMap` 2D overlay grid with stamp, decay, sample for danger/value annotations
+
+#### Simulation
+- **spatial hashing** — `RvoSimulation::step()` now uses spatial hash grid for neighbor queries (O(n^2) to O(n*k)); `RvoSimulation::with_neighbor_dist()`
+
+#### 3D Navigation
 - **multi-layer** — `MultiLayerNavMesh` overlapping navigation surfaces with cross-layer connections (stairs, elevators)
 - **voxel nav** — `NavVolume` 3D voxel grid with 26-connected A* for flying/swimming agents
-- **heightfield baking** — `Heightfield` voxelized 3D geometry representation; `bake_navmesh_from_geometry()` full pipeline (rasterize → walkability → clearance → erosion → region flood-fill → contour → convex hull → navmesh); `HeightfieldConfig` with slope, clearance, radius settings
-- **SIMD/SOA RVO** — `RvoSimulation` now uses struct-of-arrays layout, pre-allocated work buffers, `#[inline(always)]` on `compute_orca_half_plane`; zero per-frame allocation in `step()`
-- **parallel pathfinding** — feature-gated `parallel` module (`--features parallel`): `find_paths_parallel`, `find_mesh_paths_parallel`, `find_paths_jps_parallel`, `find_paths_theta_parallel`, `flow_fields_parallel`, `find_paths_custom_parallel` — all using rayon `par_iter`
-- **tests** — 230+ new tests across all features (506 unit + 6 integration + 2 doc = 514 total with parallel)
+- **height queries** — `NavMesh3D::sample_height()` ground-snap (x,z) to y; `snap_to_surface()` convenience method
+- **heightfield baking** — `Heightfield` voxelized 3D geometry representation; `bake_navmesh_from_geometry()` full pipeline (rasterize, walkability, clearance, erosion, region flood-fill, contour, convex hull, navmesh); `HeightfieldConfig` with slope, clearance, radius settings
+- **collider nav** — `navmesh_from_colliders()` auto-generates NavMesh from physics collider shapes (circle/AABB/convex poly)
 
-### Fixed
-- **bridge** — `wind_to_movement_cost` had inverted physics: tailwind was increasing cost instead of decreasing it. Sign of dot-product contribution corrected; wind-speed normalization removed so 10 m/s headwind properly yields 2× cost
+#### Performance Infrastructure
+- **SIMD/SOA RVO** — `RvoSimulation` struct-of-arrays layout, pre-allocated work buffers, `#[inline(always)]` on `compute_orca_half_plane`; zero per-frame allocation in `step()`
+- **parallel pathfinding** — feature-gated `parallel` module (`--features parallel`): `find_paths_parallel`, `find_mesh_paths_parallel`, `find_paths_jps_parallel`, `find_paths_theta_parallel`, `flow_fields_parallel`, `find_paths_custom_parallel` via rayon `par_iter`
+
+#### Cross-Crate Integration
+- **bridge** — cross-crate primitive-value bridges: impetus (collider to `Obstacle`, velocity 3D to `Vec2`), jantu (group target to `Vec2`, flee point to `(Vec2, f32)`), pavan (wind to movement cost, slope to speed scale)
+- **integration/soorat** — feature-gated `soorat-compat` module: `NavMeshWireframe::from_navmesh()`, `PathVisualization::from_path_result()`, `FlowFieldVisualization::from_flow_field()`, `CrowdVisualization::from_crowd()`, `HpaOverlay::from_clusters()`
+
+#### Testing & Tooling
+- **tests** — 544 tests (all features), 51 benchmarks; `bench-history.sh` CSV tracking, `coverage-check.sh` validation
 
 ### Changed
 - zerocopy 0.8.47 -> 0.8.48
+
+### Fixed
+- **bridge** — `wind_to_movement_cost` had inverted physics: tailwind was increasing cost instead of decreasing it. Sign of dot-product contribution corrected; wind-speed normalization removed so 10 m/s headwind properly yields 2x cost
 
 ## [0.26.3] — 2026-03-26
 
