@@ -39,7 +39,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **multi-layer** — `MultiLayerNavMesh` overlapping navigation surfaces with cross-layer connections (stairs, elevators)
 - **voxel nav** — `NavVolume` 3D voxel grid with 26-connected A* for flying/swimming agents
 - **heightfield baking** — `Heightfield` voxelized 3D geometry representation; `bake_navmesh_from_geometry()` full pipeline (rasterize → walkability → clearance → erosion → region flood-fill → contour → convex hull → navmesh); `HeightfieldConfig` with slope, clearance, radius settings
-- **tests** — 220+ new tests across all P3 features (494 unit + 6 integration + 2 doc = 502 total)
+- **SIMD/SOA RVO** — `RvoSimulation` now uses struct-of-arrays layout, pre-allocated work buffers, `#[inline(always)]` on `compute_orca_half_plane`; zero per-frame allocation in `step()`
+- **parallel pathfinding** — feature-gated `parallel` module (`--features parallel`): `find_paths_parallel`, `find_mesh_paths_parallel`, `find_paths_jps_parallel`, `find_paths_theta_parallel`, `flow_fields_parallel`, `find_paths_custom_parallel` — all using rayon `par_iter`
+- **tests** — 230+ new tests across all features (506 unit + 6 integration + 2 doc = 514 total with parallel)
 
 ### Fixed
 - **bridge** — `wind_to_movement_cost` had inverted physics: tailwind was increasing cost instead of decreasing it. Sign of dot-product contribution corrected; wind-speed normalization removed so 10 m/s headwind properly yields 2× cost

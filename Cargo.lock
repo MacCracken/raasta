@@ -367,6 +367,7 @@ version = "1.0.0"
 dependencies = [
  "criterion",
  "hisab",
+ "rayon",
  "serde",
  "serde_json",
  "tracing",

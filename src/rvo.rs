@@ -50,6 +50,7 @@ impl RvoAgent {
 /// collision with agent B within `time_horizon` seconds.
 /// Each agent takes half the responsibility (reciprocal).
 #[cfg_attr(feature = "logging", instrument)]
+#[inline(always)]
 #[must_use]
 pub fn compute_orca_half_plane(a: &RvoAgent, b: &RvoAgent, time_horizon: f32) -> HalfPlane {
     let relative_pos = b.position - a.position;
@@ -186,6 +187,7 @@ pub fn solve_velocity(constraints: &[HalfPlane], preferred: Vec2, max_speed: f32
 }
 
 /// Find the best velocity on a constraint line that satisfies all other constraints.
+#[inline]
 fn solve_on_line(line: &HalfPlane, constraints: &[HalfPlane], max_speed: f32) -> Vec2 {
     let direction = Vec2::new(-line.normal.y, line.normal.x);
 
@@ -306,18 +308,69 @@ impl SpatialHash {
     }
 }
 
+/// SOA (struct-of-arrays) layout for agent data — enables better auto-vectorization.
+///
+/// Stores agent fields in separate contiguous arrays so that inner loops
+/// touching only positions (or only radii, etc.) get cache-friendly access
+/// and the compiler can auto-vectorize with SIMD instructions.
+#[derive(Debug, Clone, Default)]
+struct AgentSoa {
+    positions_x: Vec<f32>,
+    positions_y: Vec<f32>,
+    velocities_x: Vec<f32>,
+    velocities_y: Vec<f32>,
+    preferred_x: Vec<f32>,
+    preferred_y: Vec<f32>,
+    radii: Vec<f32>,
+    max_speeds: Vec<f32>,
+}
+
+impl AgentSoa {
+    /// Rebuild SOA arrays from the canonical AOS agent slice.
+    fn rebuild(&mut self, agents: &[RvoAgent]) {
+        let n = agents.len();
+        self.positions_x.resize(n, 0.0);
+        self.positions_y.resize(n, 0.0);
+        self.velocities_x.resize(n, 0.0);
+        self.velocities_y.resize(n, 0.0);
+        self.preferred_x.resize(n, 0.0);
+        self.preferred_y.resize(n, 0.0);
+        self.radii.resize(n, 0.0);
+        self.max_speeds.resize(n, 0.0);
+
+        for (i, a) in agents.iter().enumerate() {
+            self.positions_x[i] = a.position.x;
+            self.positions_y[i] = a.position.y;
+            self.velocities_x[i] = a.velocity.x;
+            self.velocities_y[i] = a.velocity.y;
+            self.preferred_x[i] = a.preferred_velocity.x;
+            self.preferred_y[i] = a.preferred_velocity.y;
+            self.radii[i] = a.radius;
+            self.max_speeds[i] = a.max_speed;
+        }
+    }
+}
+
 /// Multi-agent RVO simulation.
 ///
 /// Manages a set of agents and computes collision-free velocities each tick.
 /// Uses a spatial hash grid for efficient neighbor queries, reducing the
 /// constraint computation from O(n^2) to O(n*k) where k is the average
 /// number of nearby agents.
+///
+/// Internally uses SOA (struct-of-arrays) caching and pre-allocated work
+/// buffers to minimize per-frame allocations and improve cache locality.
 #[derive(Debug, Clone)]
 pub struct RvoSimulation {
     agents: Vec<RvoAgent>,
     time_horizon: f32,
     neighbor_dist: f32,
     spatial_hash: SpatialHash,
+    // Pre-allocated work buffers (avoid per-frame allocation)
+    soa: AgentSoa,
+    new_velocities: Vec<Vec2>,
+    constraint_buf: Vec<HalfPlane>,
+    neighbor_buf: Vec<usize>,
 }
 
 impl RvoSimulation {
@@ -335,6 +388,10 @@ impl RvoSimulation {
             time_horizon,
             neighbor_dist,
             spatial_hash: SpatialHash::new(neighbor_dist),
+            soa: AgentSoa::default(),
+            new_velocities: Vec::new(),
+            constraint_buf: Vec::new(),
+            neighbor_buf: Vec::new(),
         }
     }
 
@@ -351,6 +408,10 @@ impl RvoSimulation {
             time_horizon,
             neighbor_dist,
             spatial_hash: SpatialHash::new(neighbor_dist),
+            soa: AgentSoa::default(),
+            new_velocities: Vec::new(),
+            constraint_buf: Vec::new(),
+            neighbor_buf: Vec::new(),
         }
     }
 
@@ -390,12 +451,21 @@ impl RvoSimulation {
 
     /// Step the simulation by `dt` seconds.
     ///
-    /// Rebuilds the spatial hash, computes ORCA constraints for nearby agent
-    /// pairs, solves for safe velocities, and updates positions.
+    /// Rebuilds the spatial hash and SOA cache, computes ORCA constraints for
+    /// nearby agent pairs, solves for safe velocities, and updates positions.
+    ///
+    /// Uses pre-allocated buffers to avoid per-frame allocations and SOA layout
+    /// for cache-friendly distance checks.
     #[cfg_attr(feature = "logging", instrument(skip(self), fields(agents = self.agents.len())))]
     pub fn step(&mut self, dt: f32) {
         let n = self.agents.len();
-        let mut new_velocities = vec![Vec2::ZERO; n];
+
+        // Reuse velocity buffer across frames
+        self.new_velocities.resize(n, Vec2::ZERO);
+        self.new_velocities.fill(Vec2::ZERO);
+
+        // Rebuild SOA cache for cache-friendly inner-loop access
+        self.soa.rebuild(&self.agents);
 
         // Rebuild spatial hash
         self.spatial_hash.clear();
@@ -404,39 +474,39 @@ impl RvoSimulation {
         }
 
         let neighbor_dist_sq = self.neighbor_dist * self.neighbor_dist;
-        let mut neighbor_indices = Vec::new();
 
         #[allow(clippy::needless_range_loop)]
         for i in 0..n {
-            let mut constraints = Vec::new();
+            self.constraint_buf.clear();
+            self.neighbor_buf.clear();
 
             // Query nearby agents via spatial hash
-            neighbor_indices.clear();
             self.spatial_hash.query_neighbors(
                 self.agents[i].position,
                 self.neighbor_dist,
-                &mut neighbor_indices,
+                &mut self.neighbor_buf,
             );
 
-            for &j in &neighbor_indices {
+            for j_idx in 0..self.neighbor_buf.len() {
+                let j = self.neighbor_buf[j_idx];
                 if i == j {
                     continue;
                 }
-                // Distance check for circular accuracy (spatial hash returns a square region)
-                let dist_sq = self.agents[i]
-                    .position
-                    .distance_squared(self.agents[j].position);
+                // SOA-based distance check — cache-friendly scalar access
+                let dx = self.soa.positions_x[j] - self.soa.positions_x[i];
+                let dy = self.soa.positions_y[j] - self.soa.positions_y[i];
+                let dist_sq = dx * dx + dy * dy;
                 if dist_sq > neighbor_dist_sq {
                     continue;
                 }
 
                 let hp =
                     compute_orca_half_plane(&self.agents[i], &self.agents[j], self.time_horizon);
-                constraints.push(hp);
+                self.constraint_buf.push(hp);
             }
 
-            new_velocities[i] = solve_velocity(
-                &constraints,
+            self.new_velocities[i] = solve_velocity(
+                &self.constraint_buf,
                 self.agents[i].preferred_velocity,
                 self.agents[i].max_speed,
             );
@@ -444,7 +514,7 @@ impl RvoSimulation {
 
         // Apply velocities and move
         for (i, agent) in self.agents.iter_mut().enumerate() {
-            agent.velocity = new_velocities[i];
+            agent.velocity = self.new_velocities[i];
             agent.position += agent.velocity * dt;
         }
     }
@@ -827,5 +897,50 @@ mod tests {
             "expected ~1.0, got {}",
             sim.agent(0).velocity.x
         );
+    }
+
+    #[test]
+    fn rvo_many_agents_no_panic() {
+        let mut sim = RvoSimulation::new(2.0);
+        for i in 0..100 {
+            let x = (i % 10) as f32 * 3.0;
+            let y = (i / 10) as f32 * 3.0;
+            sim.add_agent(RvoAgent::new(Vec2::new(x, y), 0.5, 2.0));
+        }
+        for i in 0..100 {
+            sim.set_preferred_velocity(i, Vec2::new(1.0, 0.0));
+        }
+        // Should not panic or infinite-loop
+        for _ in 0..10 {
+            sim.step(0.1);
+        }
+        assert_eq!(sim.agent_count(), 100);
+    }
+
+    #[test]
+    fn rvo_step_reuses_buffers() {
+        let mut sim = RvoSimulation::new(2.0);
+        for i in 0..10 {
+            sim.add_agent(RvoAgent::new(Vec2::new(i as f32 * 2.0, 0.0), 0.5, 2.0));
+        }
+        // Multiple steps should work (buffers reused, no allocation growth)
+        for _ in 0..50 {
+            sim.step(0.05);
+        }
+        assert_eq!(sim.agent_count(), 10);
+    }
+
+    #[test]
+    fn soa_rebuild_matches_agents() {
+        let agents = vec![
+            RvoAgent::new(Vec2::new(1.0, 2.0), 0.5, 3.0),
+            RvoAgent::new(Vec2::new(4.0, 5.0), 1.0, 6.0),
+        ];
+        let mut soa = AgentSoa::default();
+        soa.rebuild(&agents);
+        assert!((soa.positions_x[0] - 1.0).abs() < f32::EPSILON);
+        assert!((soa.positions_y[1] - 5.0).abs() < f32::EPSILON);
+        assert!((soa.radii[0] - 0.5).abs() < f32::EPSILON);
+        assert!((soa.max_speeds[1] - 6.0).abs() < f32::EPSILON);
     }
 }

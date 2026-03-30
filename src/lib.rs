@@ -63,6 +63,9 @@ mod voxel;
 #[cfg(feature = "logging")]
 pub mod logging;
 
+#[cfg(feature = "parallel")]
+pub mod parallel;
+
 // Re-export hisab math types used in our public API
 pub use hisab::{Vec2, Vec3};
 

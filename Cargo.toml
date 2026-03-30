@@ -17,11 +17,13 @@ exclude = [".claude/", ".github/", "docs/", "scripts/"]
 default = []
 soorat-compat = []
 logging = ["dep:tracing", "dep:tracing-subscriber"]
+parallel = ["dep:rayon"]
 
 [dependencies]
 # Math — hisab re-exports glam types (Vec2, Vec3, etc.)
 hisab = { version = "0.24", default-features = false, features = ["transforms"] }
 serde = { version = "1", features = ["derive"] }
+rayon = { version = "1", optional = true }
 tracing = { version = "0.1", optional = true }
 
 # Logging (optional)
