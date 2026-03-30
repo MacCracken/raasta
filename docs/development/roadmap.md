@@ -76,21 +76,21 @@
 - [ ] Agent radius erosion
 - [ ] 3D navigation volumes (voxel nav)
 
-## Cross-Crate Bridges
+## Cross-Crate Bridges ✅
 
-- [ ] `bridge.rs` module — primitive-value conversions for cross-crate navigation
-- [ ] **impetus bridge**: collider positions/radii → navmesh obstacle holes; rigid body velocity → dynamic obstacle avoidance
-- [ ] **jantu bridge**: group target position → crowd destination; flee point → repulsion field center
-- [ ] **pavan bridge**: wind velocity [f32; 3] → movement cost modifier; terrain slope → traversal speed scaling
+- [x] `bridge.rs` module — primitive-value conversions for cross-crate navigation
+- [x] **impetus bridge**: collider positions/radii → `Obstacle`; rigid body velocity → `Vec2`
+- [x] **jantu bridge**: group target position → `Vec2` destination; flee point → `(Vec2, f32)` repulsion
+- [x] **pavan bridge**: wind velocity → movement cost modifier; terrain slope → traversal speed scaling
 
-## Soorat Integration
+## Soorat Integration ✅
 
-- [ ] `integration/soorat.rs` module — feature-gated `soorat-compat`
-- [ ] **NavMesh wireframe**: polygon edges and vertices for debug line rendering
-- [ ] **Path visualization**: waypoint sequences with cost for colored line rendering
-- [ ] **Flow field**: grid of movement direction vectors for arrow rendering
-- [ ] **Crowd positions**: agent positions, velocities, and radii for instanced circle rendering
-- [ ] **HPA graph**: hierarchical cluster boundaries for debug overlay rendering
+- [x] `integration/soorat.rs` module — feature-gated `soorat-compat`
+- [x] **NavMesh wireframe**: `NavMeshWireframe::from_navmesh()` — polygon edges for debug line rendering
+- [x] **Path visualization**: `PathVisualization::from_path_result()` — waypoints with cumulative cost
+- [x] **Flow field**: `FlowFieldVisualization::from_flow_field()` — normalized direction grid
+- [x] **Crowd positions**: `CrowdVisualization::from_crowd()` — agent positions, velocities, radii
+- [x] **HPA graph**: `HpaOverlay::from_clusters()` — cluster boundaries + connection edges
 
 ## Dependency Map
 

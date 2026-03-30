@@ -7,10 +7,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ## [0.27.0]
 
 ### Added
-- **bridge** — cross-crate primitive-value bridges for impetus (collider to obstacle, velocity 3D to 2D), jantu (group target to destination, flee point to repulsion), pavan (wind to movement cost, slope to speed scale)
-- **integration/soorat** — feature-gated `soorat-compat` module with visualization data structures: `NavMeshWireframe` (edge pairs), `PathVisualization` (waypoints with cost), `FlowFieldVisualization` (direction grid), `CrowdVisualization` (agent positions/velocities/radii), `HpaOverlay` (cluster boundaries)
+- **bridge** — cross-crate primitive-value bridges returning raasta types: impetus (collider → `Obstacle`, velocity 3D → `Vec2`), jantu (group target → `Vec2` destination, flee point → `(Vec2, f32)` repulsion), pavan (wind → movement cost, slope → speed scale)
+- **integration/soorat** — feature-gated `soorat-compat` module with visualization data structures and conversion functions: `NavMeshWireframe::from_navmesh()`, `PathVisualization::from_path_result()`, `FlowFieldVisualization::from_flow_field()`, `CrowdVisualization::from_crowd()`, `HpaOverlay::from_clusters()`
 
-### Updated
+### Fixed
+- **bridge** — `wind_to_movement_cost` had inverted physics: tailwind was increasing cost instead of decreasing it. Sign of dot-product contribution corrected; wind-speed normalization removed so 10 m/s headwind properly yields 2× cost
+
+### Changed
 - zerocopy 0.8.47 -> 0.8.48
 
 ## [0.26.3] — 2026-03-26
